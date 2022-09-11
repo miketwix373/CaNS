@@ -111,11 +111,11 @@ module mod_rk
 #else
     call timer_tic('mom?_d()',1)
     !$acc kernels default(present) async(1)
-    !$OMP WORKSHARE
+    !$OMP PARALLEL WORKSHARE
     dudtrk(:,:,:) = 0._rp
     dvdtrk(:,:,:) = 0._rp
     dwdtrk(:,:,:) = 0._rp
-    !$OMP END WORKSHARE
+    !$OMP END PARALLEL WORKSHARE
     !$acc end kernels
 #if !defined(_IMPDIFF)
     call momx_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,u,dudtrk)
@@ -123,11 +123,11 @@ module mod_rk
     call momz_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,w,dwdtrk)
 #else
     !$acc kernels default(present) async(1)
-    !$OMP WORKSHARE
+    !$OMP PARALLEL WORKSHARE
     dudtrkd(:,:,:) = 0._rp
     dvdtrkd(:,:,:) = 0._rp
     dwdtrkd(:,:,:) = 0._rp
-    !$OMP END WORKSHARE
+    !$OMP END PARALLEL WORKSHARE
     !$acc end kernels
 #if !defined(_IMPDIFF_1D)
     call momx_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,u,dudtrkd)
@@ -188,11 +188,11 @@ module mod_rk
     call timer_toc('update dudtrk')
 !#if 0 /*pressure gradient term treated explicitly later */
 !    !$acc kernels
-!    !$OMP WORKSHARE
+!    !$OMP PARALLEL WORKSHARE
 !    dudtrk(:,:,:) = 0._rp
 !    dvdtrk(:,:,:) = 0._rp
 !    dwdtrk(:,:,:) = 0._rp
-!    !$OMP END WORKSHARE
+!    !$OMP END PARALLEL WORKSHARE
 !    !$acc end kernels
 !    call momx_p(n(1),n(2),n(3),dli(1),bforce(1),p,dudtrk)
 !    call momy_p(n(1),n(2),n(3),dli(2),bforce(2),p,dvdtrk)
