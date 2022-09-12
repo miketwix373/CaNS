@@ -614,7 +614,7 @@ module mod_fft
     ! where:
     ! v(n) = x(2n       ),              0 <= n <= floor((N-1)/2)
     !      = x(2N -2n -1), floor((N+1)/2) <= n <= N-1
-    ! with n = 0,...,N-1; N = size(v)
+    ! with n = 0,...,N-1; N = size(v) = size(x)
     !
     use mod_common_cudecomp, only: buf => work
     implicit none
