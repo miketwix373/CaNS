@@ -248,7 +248,7 @@ module mod_rk
 #if defined(_IMPDIFF)
     call timer_tic('updt dudtrkd',6)
     !
-    ! compute rhs of helmholtz equation
+    ! compute rhs of Helmholtz equation
     !
     !$acc parallel loop collapse(3) default(present) async(1)
     !$OMP PARALLEL DO DEFAULT(none) &
