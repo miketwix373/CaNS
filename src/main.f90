@@ -32,6 +32,7 @@ program cans
   use, intrinsic :: ieee_arithmetic, only: is_nan => ieee_is_nan
   use mpi
   use decomp_2d
+  use mod_adv            , only: adv, get_Umean
   use mod_bound          , only: boundp,bounduvw,updt_rhs_b
   use mod_chkdiv         , only: chkdiv
   use mod_chkdt          , only: chkdt
@@ -87,6 +88,8 @@ program cans
   real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
+  real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
+  real(rp), allocatable, dimension(:,:) :: uMean, uBCx, uBCy, uBCz
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanp
 #else
@@ -155,6 +158,10 @@ program cans
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            p( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            pp(0:n(1)+1,0:n(2)+1,0:n(3)+1))
+  allocate(upast(2,0:n(2)+1,0:n(3)+1),&
+           vpast(2,0:n(2)+1,0:n(3)+1),&
+           wpast(2,0:n(2)+1,0:n(3)+1))
+  allocate(uMean(n(2),n(3)),uBCx(n(2),n(3)),uBCy(n(2),n(3)),uBCz(n(2),n(3)))
   allocate(lambdaxyp(n_z(1),n_z(2)))
   allocate(ap(n_z(3)),bp(n_z(3)),cp(n_z(3)))
   allocate(dzc( 0:n(3)+1), &
@@ -317,7 +324,7 @@ program cans
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
-  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,1)
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -346,6 +353,23 @@ program cans
 #endif
     istep = istep + 1
     time = time + dt
+    
+    call get_Umean(u,n,uMean)
+    if sum(sum((cbcvel(:, :, 1) .eq. C)))>1
+      upast = u(n(1):n(1)+1,:,:)
+    end if
+
+    if sum(sum((cbcvel(:, :, 2) .eq. C)))>1
+      vpast = v(n(1):n(1)+1,:,:)
+    end if
+
+    if sum(sum((cbcvel(:, :, 3) .eq. C)))>1
+      wpast = w(n(1):n(1)+1,:,:)
+    end if
+
+
+  
+
     if(myid == 0) print*, 'Time step #', istep, 'Time = ', time
     tauxo(:) = 0.
     tauyo(:) = 0.
@@ -357,6 +381,18 @@ program cans
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f)
       call bulk_forcing(n,is_forced,f,u,v,w)
+      if sum(sum((cbcvel(:, :, 1) .eq. C)))>1
+        call adv(n,dt,dli,u,upast,uBCx,uMean)
+      end if
+
+      if sum(sum((cbcvel(:, :, 2) .eq. C)))>1
+        call adv(n,dt,dli,v,vpast,uBCy,uMean)
+      end if
+
+      if sum(sum((cbcvel(:, :, 3) .eq. C)))>1
+        call adv(n,dt,dli,w,wpast,uBCz,uMean)
+      end if
+      
 #if defined(_IMPDIFF)
       alpha = -.5*visc*dtrk
       !$OMP PARALLEL WORKSHARE

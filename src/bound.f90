@@ -12,7 +12,7 @@ module mod_bound
   private
   public boundp,bounduvw,updt_rhs_b
   contains
-  subroutine bounduvw(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w)
+  subroutine bounduvw(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,flagIF)
     !
     ! imposes velocity boundary conditions
     !
@@ -22,15 +22,26 @@ module mod_bound
     real(rp), intent(in), dimension(0:1,3,3) :: bc
     integer , intent(in), dimension(0:1,3  ) :: nb
     logical , intent(in), dimension(0:1,3  ) :: is_bound
-    logical , intent(in)                     :: is_correc
+    logical , intent(in)                     :: is_correc, flagIF
     real(rp), intent(in), dimension(3 ) :: dl
     real(rp), intent(in), dimension(0:) :: dzc,dzf
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
     logical :: impose_norm_bc
-    integer :: idir,nh
+    integer :: idir,nh,i,j,k
     !
     nh = 1
     !
+    if flagIF
+      do i=1,2
+        do j=1,3
+          do k=1,3
+            if cbc(i,j,k).eq.'C'
+              cbc(i,j,k) = 'N'
+            end if
+          end do
+        end do
+      end do
+    endif
 #if !defined(_OPENACC)
     do idir = 1,3
       call updthalo(nh,halo(idir),nb(:,idir),idir,u)
