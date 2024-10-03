@@ -1,5 +1,17 @@
 module mod_adv
+  use mpi
+  use decomp_2d_io
+  use mod_common_mpi, only:ierr,myid
+  use mod_types
   implicit none 
+    character(len=*), parameter :: fmt_dp = '(*(es24.16e3,1x))', &
+                                 fmt_sp = '(*(es15.8e2,1x))'
+#if !defined(_SINGLE_PRECISION)
+  character(len=*), parameter :: fmt_rp = fmt_dp
+#else
+  character(len=*), parameter :: fmt_rp = fmt_sp
+#endif
+
   contains
   subroutine adv(n,dt,dli,u,u_old,uBC,uMean)
   integer, intent(in), dimension(3) :: n
@@ -22,18 +34,40 @@ module mod_adv
   end subroutine adv
 
 
-  subroutine get_Umean(u,n,uMean)
-    real, intent(in),dimension(0:,0:, 0:)::  u
-    integer, intent(in), dimension(3):: n
-    real, allocatable, intent(out):: uMean(:,:)
-    integer :: i,j
-
-    allocate(uMean(n(2),n(3)))
-    do i=1,n(2)
-      do j=1,n(3)
-        uMean(i,j)      = sum(u(:,i,j), dim =1)/n(1)  
+  subroutine get_Umean(ng,lo,hi,idir,l,dl,z_g,dz,p,p1d)
+    implicit none
+    integer , intent(in), dimension(3) :: ng,lo,hi
+    integer , intent(in) :: idir
+    real(rp), intent(in), dimension(3) :: l,dl
+    real(rp), intent(in), dimension(0:       ) :: z_g
+    real(rp), intent(in), dimension(0:lo(3)-1) :: dz
+    real(rp), intent(in), dimension(lo(1)-1:,lo(2)-1:,lo(3)-1:) :: p
+    real(rp), allocatable, dimension(:,:) :: p1d
+    integer :: i,j,k
+    integer :: iunit
+    real(rp) :: grid_length_ratio,p1d_s
+    allocate(p1d(ng(idir)))
+    !$acc enter data create(p1d)
+    !$acc kernels default(present)
+    p1d(:,:) = 0._rp
+    !$acc end kernels
+    grid_length_ratio = dl(1)/(l(1))
+    !$acc parallel loop gang default(present) private(p1d_s)
+    do k=lo(3),hi(3)
+      do j=lo(2),hi(2)
+      p1d_s = 0._rp
+      !$acc loop collapse(2) reduction(+:p1d_s)
+        do i=lo(1),hi(1)
+          p1d_s = p1d_s + p(i,j,k)*grid_length_ratio
+        end do
+        p1d(j,k) = p1d_s
       end do
     end do
-    
+    !$acc exit data copyout(p1d)
+    call MPI_ALLREDUCE(MPI_IN_PLACE,p1d(1,1),ng(2)*ng(3),MPI_REAL_RP,MPI_SUM,MPI_COMM_WORLD,ierr)
+    ! 
+    ! Data is now reduced, must send the data back to the pencils.s
+    !
+
   end subroutine get_Umean
 end module mod_adv
