@@ -89,7 +89,10 @@ program cans
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
-  real(rp), allocatable, dimension(:,:) :: uMean, uBCx, uBCy, uBCz
+  real(rp), allocatable, dimension(:,:) :: uMean,vMean,wMean 
+  type uBC
+    real(rp), allocatable, dimension(:,:) ::   x, y, z
+  end type uBC
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanp
 #else
@@ -158,10 +161,11 @@ program cans
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            p( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            pp(0:n(1)+1,0:n(2)+1,0:n(3)+1))
-  allocate(upast(2,0:n(2)+1,0:n(3)+1),&
-           vpast(2,0:n(2)+1,0:n(3)+1),&
-           wpast(2,0:n(2)+1,0:n(3)+1))
-  allocate(uMean(n(2),n(3)),uBCx(n(2),n(3)),uBCy(n(2),n(3)),uBCz(n(2),n(3)))
+  allocate(upast(3,0:n(2)+1,0:n(3)+1),&
+           vpast(3,0:n(2)+1,0:n(3)+1),&
+           wpast(3,0:n(2)+1,0:n(3)+1))
+  allocate(uMean(ng(2),ng(3)),vMean(ng(2),ng(3)),wMean(ng(2),ng(3)))
+  allocate(uBC%x(n(2),n(3)),uBC%y(n(2),n(3)),uBC%z(n(2),n(3)))
   allocate(lambdaxyp(n_z(1),n_z(2)))
   allocate(ap(n_z(3)),bp(n_z(3)),cp(n_z(3)))
   allocate(dzc( 0:n(3)+1), &
@@ -324,7 +328,7 @@ program cans
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
-  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,1)
+  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -354,21 +358,21 @@ program cans
     istep = istep + 1
     time = time + dt
     
-    call get_Umean(u,n,uMean)
+    call get_Umean(ng,lo,hi,l,dl,u,uMean)
+    call get_Umean(ng,lo,hi,l,dl,v,vMean)
+    call get_Umean(ng,lo,hi,l,dl,w,wMean)
+
     if sum(sum((cbcvel(:, :, 1) .eq. C)))>1
-      upast = u(n(1):n(1)+1,:,:)
+      upast = u(n(1)-1:n(1)+1,:,:)
     end if
 
     if sum(sum((cbcvel(:, :, 2) .eq. C)))>1
-      vpast = v(n(1):n(1)+1,:,:)
+      vpast = v(n(1)-1:n(1)+1,:,:)
     end if
 
     if sum(sum((cbcvel(:, :, 3) .eq. C)))>1
-      wpast = w(n(1):n(1)+1,:,:)
+      wpast = w(n(1)-1:n(1)+1,:,:)
     end if
-
-
-  
 
     if(myid == 0) print*, 'Time step #', istep, 'Time = ', time
     tauxo(:) = 0.
@@ -381,16 +385,17 @@ program cans
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f)
       call bulk_forcing(n,is_forced,f,u,v,w)
-      if sum(sum((cbcvel(:, :, 1) .eq. C)))>1
-        call adv(n,dt,dli,u,upast,uBCx,uMean)
+
+      if sum(sum((cbcvel(:, :, 1) .eq. C)))
+        call adv(n,dt,dli,u,upast,uBC%x,uMean)
       end if
 
-      if sum(sum((cbcvel(:, :, 2) .eq. C)))>1
-        call adv(n,dt,dli,v,vpast,uBCy,uMean)
+      if sum(sum((cbcvel(:, :, 2) .eq. C)))
+        call adv(n,dt,dli,v,vpast,uBC%y,vMean)
       end if
 
-      if sum(sum((cbcvel(:, :, 3) .eq. C)))>1
-        call adv(n,dt,dli,w,wpast,uBCz,uMean)
+      if sum(sum((cbcvel(:, :, 3) .eq. C)))
+        call adv(n,dt,dli,w,wpast,uBC%z,wMean)
       end if
       
 #if defined(_IMPDIFF)
@@ -472,7 +477,7 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,uBC)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
