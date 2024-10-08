@@ -89,7 +89,7 @@ program cans
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
-  real(rp), allocatable, dimension(:,:) :: uMean,vMean,wMean 
+  real(rp),:: uMean
   type uBC
     real(rp), allocatable, dimension(:,:) ::   x, y, z
   end type uBC
@@ -164,7 +164,6 @@ program cans
   allocate(upast(3,0:n(2)+1,0:n(3)+1),&
            vpast(3,0:n(2)+1,0:n(3)+1),&
            wpast(3,0:n(2)+1,0:n(3)+1))
-  allocate(uMean(ng(2),ng(3)),vMean(ng(2),ng(3)),wMean(ng(2),ng(3)))
   allocate(uBC%x(n(2),n(3)),uBC%y(n(2),n(3)),uBC%z(n(2),n(3)))
   allocate(lambdaxyp(n_z(1),n_z(2)))
   allocate(ap(n_z(3)),bp(n_z(3)),cp(n_z(3)))
@@ -359,8 +358,6 @@ program cans
     time = time + dt
     
     call get_Umean(ng,lo,hi,l,dl,u,uMean)
-    call get_Umean(ng,lo,hi,l,dl,v,vMean)
-    call get_Umean(ng,lo,hi,l,dl,w,wMean)
 
     if sum(sum((cbcvel(:, :, 1) .eq. C)))>1
       upast = u(n(1)-1:n(1)+1,:,:)
@@ -391,11 +388,11 @@ program cans
       end if
 
       if sum(sum((cbcvel(:, :, 2) .eq. C)))
-        call adv(n,dt,dli,v,vpast,uBC%y,vMean)
+        call adv(n,dt,dli,v,vpast,uBC%y,uMean)
       end if
 
       if sum(sum((cbcvel(:, :, 3) .eq. C)))
-        call adv(n,dt,dli,w,wpast,uBC%z,wMean)
+        call adv(n,dt,dli,w,wpast,uBC%z,uMean)
       end if
       
 #if defined(_IMPDIFF)
