@@ -79,7 +79,7 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean
+  use mod_utils          , only: bulk_mean,allocate_bc_vel
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
@@ -90,9 +90,21 @@ program cans
   real(rp), dimension(3) :: f
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
   real(rp),:: uMean
-  type uBC
-    real(rp), allocatable, dimension(:,:) ::   x, y, z
-  end type uBC
+  type  flow_data
+    real, allocatable :: inf(:,:)
+    real, allocatable :: outf(:,:)
+  end type flow_data
+
+  type xyz_case
+    type(flow_data) :: x, y, z
+  end type xyz_case
+
+  type  bc_direct
+    type(xyz_case) :: u, v, w
+  end type bc_direct
+
+  type(bc_direct): bc_vel
+
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanp
 #else
@@ -164,7 +176,6 @@ program cans
   allocate(upast(3,0:n(2)+1,0:n(3)+1),&
            vpast(3,0:n(2)+1,0:n(3)+1),&
            wpast(3,0:n(2)+1,0:n(3)+1))
-  allocate(uBC%x(n(2),n(3)),uBC%y(n(2),n(3)),uBC%z(n(2),n(3)))
   allocate(lambdaxyp(n_z(1),n_z(2)))
   allocate(ap(n_z(3)),bp(n_z(3)),cp(n_z(3)))
   allocate(dzc( 0:n(3)+1), &
@@ -205,6 +216,24 @@ program cans
            rhsbx(  n(2),n(3),0:1), &
            rhsby(  n(1),n(3),0:1), &
            rhsbz(  n(1),n(2),0:1))
+  allocate(bc_vel%u%x%inf(n(2),n(3)), &
+           bc_vel%u%x%outf((n2),n(3)), &
+           bc_vel%u%y%inf((n2),n(3)), &
+           bc_vel%u%y%outf((n2),n(3)), &
+           bc_vel%u%z%inf((n2),n(3)), &
+           bc_vel%u%z%outf((n2),n(3)), &
+           bc_vel%v%x%inf((n1),n(3)), &
+           bc_vel%v%x%outf((n1),n(3)), &
+           bc_vel%v%y%inf((n1),n(3)), &
+           bc_vel%v%y%outf((n1),n(3)), &
+           bc_vel%v%z%inf((n1),n(3)), &
+           bc_vel%v%z%outf((n1),n(3)), &
+           bc_vel%w%x%inf((n1),n(2)), &
+           bc_vel%w%x%outf((n1),n(2)), &
+           bc_vel%w%y%inf((n1),n(2)), &
+           bc_vel%w%y%outf((n1),n(2)), &
+           bc_vel%w%z%inf((n1),n(2)), &
+           bc_vel%w%z%outf((n1),n(2)))           
 #endif
 #if defined(_DEBUG)
   if(myid == 0) print*, 'This executable of CaNS was built with compiler: ', compiler_version()
@@ -327,7 +356,27 @@ program cans
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
-  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
+
+  call allocate_bc_vel(bc_vel%u%x%inf,cbcvel(0,1,1))
+  call allocate_bc_vel(bc_vel%u%x%outf,cbcvel(1,1,1))
+  call allocate_bc_vel(bc_vel%u%y%inf,cbcvel(0,2,1))
+  call allocate_bc_vel(bc_vel%u%y%outf,cbcvel(1,2,1))
+  call allocate_bc_vel(bc_vel%u%z%inf,cbcvel(0,3,1))
+  call allocate_bc_vel(bc_vel%u%z%outf,cbcvel(1,3,1))
+  call allocate_bc_vel(bc_vel%v%x%inf,cbcvel(0,1,2))
+  call allocate_bc_vel(bc_vel%v%x%outf,cbcvel(1,1,2))
+  call allocate_bc_vel(bc_vel%v%y%inf,cbcvel(0,2,2))
+  call allocate_bc_vel(bc_vel%v%y%outf,cbcvel(1,2,2))
+  call allocate_bc_vel(bc_vel%v%z%inf,cbcvel(0,3,2))
+  call allocate_bc_vel(bc_vel%v%z%outf,cbcvel(1,3,2))
+  call allocate_bc_vel(bc_vel%w%x%inf,cbcvel(0,1,3))
+  call allocate_bc_vel(bc_vel%w%x%outf,cbcvel(1,1,3))
+  call allocate_bc_vel(bc_vel%w%y%inf,cbcvel(0,2,3))
+  call allocate_bc_vel(bc_vel%w%y%outf,cbcvel(1,2,3))
+  call allocate_bc_vel(bc_vel%w%z%inf,cbcvel(0,3,3))
+  call allocate_bc_vel(bc_vel%w%z%outf,cbcvel(1,3,3))
+
+  call bounduvw(bc_vel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition

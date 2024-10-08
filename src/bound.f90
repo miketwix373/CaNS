@@ -12,39 +12,37 @@ module mod_bound
   private
   public boundp,bounduvw,updt_rhs_b
   contains
-  subroutine bounduvw(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,flagIF,uBCval)
+  subroutine bounduvw(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,flagIF)
     !
     ! imposes velocity boundary conditions
     !
     implicit none
     character(len=1), intent(in), dimension(0:1,3,3) :: cbc
     integer , intent(in), dimension(3) :: n
-    real(rp), intent(in), dimension(0:1,3,3) :: bc
+    integer , pointer,  intent(in), dimension(0:1,3,3) :: bc
     integer , intent(in), dimension(0:1,3  ) :: nb
     logical , intent(in), dimension(0:1,3  ) :: is_bound
-    logical , intent(in), optional           :: is_correc, flagIF
-    logical , intent(in)                     :: is_correc
-    real(rp), intent(in), dimension(:,:),optional :: uBC
+    logical , intent(in)           :: is_correc, flagIF
     real(rp), intent(in), dimension(3 ) :: dl
     real(rp), intent(in), dimension(0:) :: dzc,dzf
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
     logical :: impose_norm_bc
     integer :: idir,nh,i,j,k
-    type(uBC) :: uBCval
-    !
+
+    ! 
     nh = 1
     !
+
+    ! Modify the convective boundary conditions in the intial step
     if flagIF
-      do i=1,2
+      do i=0,1
         do j=1,3
           do k=1,3
-            if cbc(i,j,k).eq.'C'
-              cbc(i,j,k) = 'N'
-            end if
+            if cbc(i,j,k).eq.'P' then cbc(i,j,k) = 'N'
           end do
         end do
       end do
-    endif
+    end if
 #if !defined(_OPENACC)
     do idir = 1,3
       call updthalo(nh,halo(idir),nb(:,idir),idir,u)
@@ -60,22 +58,18 @@ module mod_bound
     impose_norm_bc = (.not.is_correc).or.(cbc(0,1,1)//cbc(1,1,1) == 'PP')
     if(is_bound(0,1)) then
       if(impose_norm_bc) 
-
-        if sum(cbc(0,1,:).eq. 'C')>0
-            call set_bc(cbc(0,1,1),0,1,nh,.false.,bc(0,1,1),dl(1),u,uBCval%x)
-            call set_bc(cbc(0,1,2),0,1,nh,.true. ,bc(0,1,2),dl(1),v,uBCval%y)
-            call set_bc(cbc(0,1,3),0,1,nh,.true. ,bc(0,1,3),dl(1),w,uBCval%z)
-          else 
-            call set_bc(cbc(0,1,1),0,1,nh,.false.,bc(0,1,1),dl(1),u,uBCval%x)
-            call set_bc(cbc(0,1,2),0,1,nh,.true. ,bc(0,1,2),dl(1),v,uBCval%y)
-            call set_bc(cbc(0,1,3),0,1,nh,.true. ,bc(0,1,3),dl(1),w,uBCval%z)
-        end if
+        call set_bc(cbc(0,1,1),0,1,nh,.false.,bc(0,1,1),dl(1),u)
+        call set_bc(cbc(0,1,2),0,1,nh,.true. ,bc(0,1,2),dl(1),v)
+        call set_bc(cbc(0,1,3),0,1,nh,.true. ,bc(0,1,3),dl(1),w)
       end if
     end if
     if(is_bound(1,1)) then
-      if(impose_norm_bc) call set_bc(cbc(1,1,1),1,1,nh,.false.,bc(1,1,1),dl(1),u)
-                         call set_bc(cbc(1,1,2),1,1,nh,.true. ,bc(1,1,2),dl(1),v)
-                         call set_bc(cbc(1,1,3),1,1,nh,.true. ,bc(1,1,3),dl(1),w)
+      if(impose_norm_bc) 
+          call set_bc(cbc(1,1,1),1,1,nh,.false.,bc(1,1,1),dl(1),u)
+          call set_bc(cbc(1,1,2),1,1,nh,.true. ,bc(1,1,2),dl(1),v)
+          call set_bc(cbc(1,1,3),1,1,nh,.true. ,bc(1,1,3),dl(1),w)
+        end if
+      end if
     end if
     impose_norm_bc = (.not.is_correc).or.(cbc(0,2,2)//cbc(1,2,2) == 'PP')
     if(is_bound(0,2)) then
@@ -147,7 +141,7 @@ module mod_bound
     end if
   end subroutine boundp
   !
-  subroutine set_bc(ctype,ibound,idir,nh,centered,rvalue,dr,p,bcVal)
+  subroutine set_bc(ctype,ibound,idir,nh,centered,rvalue,dr,p)
     implicit none
     character(len=1), intent(in) :: ctype
     integer , intent(in) :: ibound,idir,nh
@@ -155,15 +149,10 @@ module mod_bound
     real(rp), intent(in) :: rvalue,dr
     real(rp), intent(inout), dimension(1-nh:,1-nh:,1-nh:) :: p
     real(rp) :: factor,sgn
-    real(rp),optional, allocatable :: bcVal(:,:)
-    integer  :: n,dh,ny,nz
+    real(rp),optional :: bcVal(:,:)
+    integer  :: n,dh
     !
     n = size(p,idir) - 2*nh
-    ny = size(p,2) - 2*nh
-    nz =  size(p,3) - 2*nh 
-    if present(bcVal)
-      allocate(bcVal(ny,nz))
-    end if
     factor = rvalue
     if(ctype == 'D'.and.centered) then
       factor = 2.*factor
@@ -177,6 +166,11 @@ module mod_bound
       end if
       sgn    = 1.
     end if
+    if(ctype == 'P'.and.centered) then
+      factor = 2.*factor
+      sgn    = -1.
+    end if
+
     !
     do dh=0,nh-1
       select case(ctype)

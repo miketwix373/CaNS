@@ -10,6 +10,21 @@ module mod_utils
   public bulk_mean,f_sizeof,swap
   !@acc public device_memory_footprint
 contains
+  subroutine allocate_bc_vel(mat,bcvel)
+    real(rp), intent(inout), dimension (:,:) :: mat
+    integer n1,n2
+    real(rp) :: bcvel
+
+    n1 = size(mat,1)
+    n2 = size(mat,2)
+    do j = 1, n1
+        do i = 1, n2
+            mat(i,j) = bcvel
+        end do
+    end do
+
+  end subroutine allocate_bc_vel
+
   subroutine bulk_mean(n,grid_vol_ratio,p,mean)
     !
     ! compute the mean value of an observable over the entire domain
