@@ -376,7 +376,7 @@ program cans
   call allocate_bc_vel(bc_vel%w%z%inf,cbcvel(0,3,3))
   call allocate_bc_vel(bc_vel%w%z%outf,cbcvel(1,3,3))
 
-  call bounduvw(bc_vel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
+  call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
