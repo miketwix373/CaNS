@@ -79,7 +79,7 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean,allocate_bc_vel
+  use mod_utils          , only: bulk_mean,allocate_bc_vel,bcStorageCreation
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
@@ -90,20 +90,7 @@ program cans
   real(rp), dimension(3) :: f
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
   real(rp),:: uMean
-  type  flow_data
-    real, allocatable :: inf(:,:)
-    real, allocatable :: outf(:,:)
-  end type flow_data
-
-  type xyz_case
-    type(flow_data) :: x, y, z
-  end type xyz_case
-
-  type  bc_direct
-    type(xyz_case) :: u, v, w
-  end type bc_direct
-
-  type(bc_direct): bc_vel
+  type(bc_direct):: bc_vel
 
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanp
@@ -151,6 +138,7 @@ program cans
   character(len=100) :: filename
   integer :: k,kk
   logical :: is_done,kill
+  call bcStorageCreation()
   !
   call MPI_INIT(ierr)
   call MPI_COMM_RANK(MPI_COMM_WORLD,myid,ierr)

@@ -8,18 +8,19 @@ module mod_bound
   use mpi
   use mod_common_mpi, only: ierr,halo,ipencil_axis
   use mod_types
+  use mod_utils , only: bcStorageCreation
   implicit none
   private
   public boundp,bounduvw,updt_rhs_b
   contains
-  subroutine bounduvw(bc_vel,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,flagIF)
+  subroutine bounduvw(cbc,n,bc_vel,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,flagIF)
     !
     ! imposes velocity boundary conditions
     !
     implicit none
-    character(len=1), intent(in), dimension(0:1,3,3) :: cbc
+    character(len=1), dimension(0:1,3,3) :: cbc
+    character(len=1), dimension(0:1,3,3) :: cbc_copy
     integer , intent(in), dimension(3) :: n
-    integer , pointer,  intent(in), dimension(0:1,3,3) :: bc
     integer , intent(in), dimension(0:1,3  ) :: nb
     logical , intent(in), dimension(0:1,3  ) :: is_bound
     logical , intent(in)           :: is_correc, flagIF
@@ -28,58 +29,67 @@ module mod_bound
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
     logical :: impose_norm_bc
     integer :: idir,nh,i,j,k
-    type(bc_direct), intent(inout) :: bc_vel
+    type  flow_data
+      real(rp), allocatable :: inf(:,:)
+      real(rp), allocatable :: outf(:,:)
+    end type flow_data
+
+    type xyz_case
+      type(flow_data) :: x, y, z
+    end type xyz_case
+
+    type  bc_direct
+      type(xyz_case) :: u, v, w
+    end type bc_direct
+    type(bc_direct) :: bc_vel
     ! 
     nh = 1
     !
-
+    cbc_copy = cbc
     ! Modify the convective boundary conditions in the intial step
 
-      do i=0,1
-        do j=1,3
-          do k=1,3
-              if flagIF
-                if cbc(i,j,k).eq.'C' then cbc(i,j,k) = 'N'
-                else cbc(i,j,k).eq.'C' then cbc(i,j,k) = 'D'
-              end if
-          end do
+    do i = 0, 1
+      do j = 1, 3
+        do k = 1, 3
+          if (flagIF) then
+            if (cbc(i,j,k) == 'C') then
+              cbc(i,j,k) = 'N'
+            else
+              cbc(i,j,k) = 'D'
+            end if
+          end if
         end do
       end do
+    end do
  
 #if !defined(_OPENACC)
-    do idir = 1,3
-      call updthalo(nh,halo(idir),nb(:,idir),idir,u)
-      call updthalo(nh,halo(idir),nb(:,idir),idir,v)
-      call updthalo(nh,halo(idir),nb(:,idir),idir,w)
-    end do
+        do idir = 1,3
+          call updthalo(nh,halo(idir),nb(:,idir),idir,u)
+          call updthalo(nh,halo(idir),nb(:,idir),idir,v)
+          call updthalo(nh,halo(idir),nb(:,idir),idir,w)
+        end do
 #else
-    call updthalo_gpu(nh,cbc(0,:,1)//cbc(1,:,1)==['PP','PP','PP'],u)
-    call updthalo_gpu(nh,cbc(0,:,2)//cbc(1,:,2)==['PP','PP','PP'],v)
-    call updthalo_gpu(nh,cbc(0,:,3)//cbc(1,:,3)==['PP','PP','PP'],w)
+        call updthalo_gpu(nh,cbc(0,:,1)//cbc(1,:,1)==['PP','PP','PP'],u)
+        call updthalo_gpu(nh,cbc(0,:,2)//cbc(1,:,2)==['PP','PP','PP'],v)
+        call updthalo_gpu(nh,cbc(0,:,3)//cbc(1,:,3)==['PP','PP','PP'],w)
 #endif
     !
     impose_norm_bc = (.not.is_correc).or.(cbc(0,1,1)//cbc(1,1,1) == 'PP')
     if(is_bound(0,1)) then
-      if(impose_norm_bc) 
-        call set_bc(cbc(0,1,1),0,1,nh,.false.,bc_vel%u%x%inf,dl(1),u)
+      if(impose_norm_bc) call set_bc(cbc(0,1,1),0,1,nh,.false.,bc_vel%u%x%inf,dl(1),u)
         call set_bc(cbc(0,1,2),0,1,nh,.true. ,bc_vel%v%x%inf,dl(1),v)
         call set_bc(cbc(0,1,3),0,1,nh,.true. ,bc_vel%w%x%inf,dl(1),w)
-      end if
     end if
     if(is_bound(1,1)) then
-      if(impose_norm_bc) 
-          call set_bc(cbc(1,1,1),1,1,nh,.false.,bc_vel%u%x%outf,dl(1),u)
+      if(impose_norm_bc) call set_bc(cbc(1,1,1),1,1,nh,.false.,bc_vel%u%x%outf,dl(1),u)
           call set_bc(cbc(1,1,2),1,1,nh,.true. ,bc_vel%v%x%outf,dl(1),v)
           call set_bc(cbc(1,1,3),1,1,nh,.true. ,bc_vel%w%x%outf,dl(1),w)
-        end if
       end if
-    end if
     impose_norm_bc = (.not.is_correc).or.(cbc(0,2,2)//cbc(1,2,2) == 'PP')
     if(is_bound(0,2)) then
                          call set_bc(cbc(0,2,1),0,2,nh,.true. ,bc_vel%u%y%inf,dl(2),u)
       if(impose_norm_bc) call set_bc(cbc(0,2,2),0,2,nh,.false.,bc_vel%v%y%inf,dl(2),v)
                          call set_bc(cbc(0,2,3),0,2,nh,.true. ,bc_vel%w%y%inf,dl(2),w)
-     end if
     end if
     if(is_bound(1,2)) then
                          call set_bc(cbc(1,2,1),1,2,nh,.true. ,bc_vel%u%y%outf,dl(2),u)
@@ -97,6 +107,8 @@ module mod_bound
                          call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc_vel%u%y%outf,dzc(n(3)),v)
       if(impose_norm_bc) call set_bc(cbc(1,3,3),1,3,nh,.false.,bc_vel%u%y%outf,dzf(n(3)),w)
     end if
+
+    cbc = cbc_copy
   end subroutine bounduvw
   !
   subroutine boundp(cbc,n,bc,nb,is_bound,dl,dzc,p)
@@ -152,7 +164,6 @@ module mod_bound
     real(rp), intent(in) :: rvalue,dr
     real(rp), intent(inout), dimension(1-nh:,1-nh:,1-nh:) :: p
     real(rp) :: factor,sgn
-    real(rp),optional :: bcVal(:,:)
     integer  :: n,dh
     !
     n = size(p,idir) - 2*nh
