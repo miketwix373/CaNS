@@ -8,7 +8,7 @@ module mod_sanity
   use, intrinsic :: iso_c_binding, only: C_PTR
   use mpi
   use decomp_2d
-  use mod_bound     , only: boundp,bounduvw,updt_rhs_b
+  use mod_bound     , only: boundp2,bounduvw2,updt_rhs_b
   use mod_chkdiv    , only: chkdiv
   use mod_common_mpi, only: myid,ierr,ipencil_axis
   use mod_correc    , only: correc
@@ -132,7 +132,8 @@ module mod_sanity
                                     (bc01v == 'ND'.and.bc01p == 'DN').or. &
                                     (bc01v == 'DN'.and.bc01p == 'ND').or. &
                                     (bc01v == 'DD'.and.bc01p == 'NN').or. &
-                                    (bc01v == 'NN'.and.bc01p == 'DD') )
+                                    (bc01v == 'NN'.and.bc01p == 'DD').or. & 
+                                    (bc01v == 'DC'.and.bc01p == 'NN'))
     end do
     if(myid == 0.and.(.not.passed_loc)) print*, 'ERROR: velocity and pressure BCs not compatible.'
     passed = passed.and.passed_loc
@@ -258,13 +259,13 @@ module mod_sanity
     dl  = dli**(-1)
     dt  = acos(-1.) ! value is irrelevant
     dti = dt**(-1)
-    call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+    call bounduvw2(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
     call fillps(n,dli,dzfi,dti,u,v,w,p)
     call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbx,rhsby,rhsbz,p)
     call solver(n,ng,arrplan,normfft,lambdaxy,a,b,c,cbcpre,['c','c','c'],p)
-    call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
+    call boundp2(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
     call correc(n,dli,dzci,dt,p,u,v,w)
-    call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w)
+    call bounduvw2(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w)
     call chkdiv(lo,hi,dli,dzfi,u,v,w,divtot,divmax)
     passed_loc = divmax < small
     if(myid == 0.and.(.not.passed_loc)) &

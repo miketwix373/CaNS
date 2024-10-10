@@ -89,9 +89,21 @@ program cans
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
-  real(rp),:: uMean
+  real(rp):: uMean
+  type  flow_data
+    real(rp), allocatable :: inf(:,:)
+    real(rp), allocatable :: outf(:,:)
+  end type flow_data
+
+  type xyz_case
+    type(flow_data) :: x, y, z
+  end type xyz_case
+
+  type  bc_direct
+    type(xyz_case) :: u, v, w
+  end type bc_direct
   type(bc_direct):: bc_vel
-  type(xyz_case):: bc_p
+  type(xyz_case):: bc_pre
 
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanp
@@ -139,7 +151,6 @@ program cans
   character(len=100) :: filename
   integer :: k,kk
   logical :: is_done,kill
-  call bcStorageCreation()
   !
   call MPI_INIT(ierr)
   call MPI_COMM_RANK(MPI_COMM_WORLD,myid,ierr)
@@ -223,12 +234,12 @@ program cans
            bc_vel%w%y%outf((n1),n(2)), &
            bc_vel%w%z%inf((n1),n(2)), &
            bc_vel%w%z%outf((n1),n(2))) 
-  allocate(bc_p%x%inf((n2),n(3)), &
-           bc_p%x%outf((n2),n(3)), &
-           bc_p%y%inf((n1),n(3)), & 
-           bc_p%y%outf((n1),n(3)), &
-           bc_p%z%inf((n1),n(2)), &
-           bc_p%x%outf((n1),n(2)))
+  allocate(bc_pre%x%inf((n2),n(3)), &
+           bc_pre%x%outf((n2),n(3)), &
+           bc_pre%y%inf((n1),n(3)), & 
+           bc_pre%y%outf((n1),n(3)), &
+           bc_pre%z%inf((n1),n(2)), &
+           bc_pre%x%outf((n1),n(2)))
             
 #endif
 #if defined(_DEBUG)
@@ -372,15 +383,15 @@ program cans
   call allocate_bc_vel(bc_vel%w%z%inf,bcvel(0,3,3))
   call allocate_bc_vel(bc_vel%w%z%outf,bcvel(1,3,3))
 
-  call allocate_bc_vel(bc_p%x%inf,bcpre(0,1))
-  call allocate_bc_vel(bc_p%x%outf,bcpre(1,1))
-  call allocate_bc_vel(bc_p%y%inf,bcpre(0,2))
-  call allocate_bc_vel(bc_p%y%outf,bcpre(1,2))
-  call allocate_bc_vel(bc_p%z%inf,bcpre(0,3))
-  call allocate_bc_vel(bc_p%z%outf,bcpre(1,3))
+  call allocate_bc_vel(bc_pre%x%inf,bcpre(0,1))
+  call allocate_bc_vel(bc_pre%x%outf,bcpre(1,1))
+  call allocate_bc_vel(bc_pre%y%inf,bcpre(0,2))
+  call allocate_bc_vel(bc_pre%y%outf,bcpre(1,2))
+  call allocate_bc_vel(bc_pre%z%inf,bcpre(0,3))
+  call allocate_bc_vel(bc_pre%z%outf,bcpre(1,3))
 
   call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
-  call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
+  call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
   !
@@ -411,15 +422,15 @@ program cans
     
     call get_Umean(ng,lo,hi,l,dl,u,uMean)
 
-    if sum(sum((cbcvel(:, :, 1) .eq. C)))>1
+    if (count(cbcvel(:, :, 1) == 'C') > 1) then 
       upast = u(n(1)-1:n(1)+1,:,:)
     end if
 
-    if sum(sum((cbcvel(:, :, 2) .eq. C)))>1
+    if (count(cbcvel(:, :, 2) == 'C') > 1) then 
       vpast = v(n(1)-1:n(1)+1,:,:)
     end if
 
-    if sum(sum((cbcvel(:, :, 3) .eq. C)))>1
+    if (count(cbcvel(:, :, 3) == 'C') > 1) then 
       wpast = w(n(1)-1:n(1)+1,:,:)
     end if
 
@@ -435,16 +446,16 @@ program cans
               is_forced,velf,bforce,u,v,w,f)
       call bulk_forcing(n,is_forced,f,u,v,w)
 
-      if sum(sum((cbcvel(:, :, 1) .eq. C)))
-        call adv(n,dt,dli,u,upast,uBC%x,uMean)
+      if (count(cbcvel(:, :, 1) == 'C') > 1) then 
+        call adv(n,dt,dl,u,upast,bc_vel%u%x%outf,uMean)
       end if
 
-      if sum(sum((cbcvel(:, :, 2) .eq. C)))
-        call adv(n,dt,dli,v,vpast,uBC%y,uMean)
+      if (count(cbcvel(:, :, 2) == 'C') > 1) then 
+        call adv(n,dt,dl,v,vpast,bc_vel%v%x%outf,uMean)
       end if
 
-      if sum(sum((cbcvel(:, :, 3) .eq. C)))
-        call adv(n,dt,dli,w,wpast,uBC%z,uMean)
+      if (count(cbcvel(:, :, 3) == 'C') > 1) then 
+        call adv(n,dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
       end if
       
 #if defined(_IMPDIFF)
@@ -526,15 +537,15 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,uBC)
+      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
-      call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
+      call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w)
+      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
-      call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
+      call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
     end do
     dpdl(:) = -dpdl(:)*dti
     !

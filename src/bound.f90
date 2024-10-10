@@ -11,7 +11,7 @@ module mod_bound
   use mod_utils , only: bcStorageCreation
   implicit none
   private
-  public boundp,bounduvw,updt_rhs_b
+  public boundp,bounduvw,updt_rhs_b, bounduvw2, boundp2
   contains
   subroutine bounduvw(cbc,n,bc_vel,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,flagIF)
     !
@@ -111,6 +111,71 @@ module mod_bound
     cbc = cbc_copy
   end subroutine bounduvw
   !
+  subroutine bounduvw2(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w)
+    !
+    ! imposes velocity boundary conditions
+    !
+    implicit none
+    character(len=1), intent(in), dimension(0:1,3,3) :: cbc
+    integer , intent(in), dimension(3) :: n
+    real(rp), intent(in), dimension(0:1,3,3) :: bc
+    integer , intent(in), dimension(0:1,3  ) :: nb
+    logical , intent(in), dimension(0:1,3  ) :: is_bound
+    logical , intent(in)                     :: is_correc
+    real(rp), intent(in), dimension(3 ) :: dl
+    real(rp), intent(in), dimension(0:) :: dzc,dzf
+    real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
+    logical :: impose_norm_bc
+    integer :: idir,nh
+    !
+    nh = 1
+    !
+#if !defined(_OPENACC)
+    do idir = 1,3
+      call updthalo(nh,halo(idir),nb(:,idir),idir,u)
+      call updthalo(nh,halo(idir),nb(:,idir),idir,v)
+      call updthalo(nh,halo(idir),nb(:,idir),idir,w)
+    end do
+#else
+    call updthalo_gpu(nh,cbc(0,:,1)//cbc(1,:,1)==['PP','PP','PP'],u)
+    call updthalo_gpu(nh,cbc(0,:,2)//cbc(1,:,2)==['PP','PP','PP'],v)
+    call updthalo_gpu(nh,cbc(0,:,3)//cbc(1,:,3)==['PP','PP','PP'],w)
+#endif
+    !
+    impose_norm_bc = (.not.is_correc).or.(cbc(0,1,1)//cbc(1,1,1) == 'PP')
+    if(is_bound(0,1)) then
+      if(impose_norm_bc) call set_bc2(cbc(0,1,1),0,1,nh,.false.,bc(0,1,1),dl(1),u)
+                         call set_bc2(cbc(0,1,2),0,1,nh,.true. ,bc(0,1,2),dl(1),v)
+                         call set_bc2(cbc(0,1,3),0,1,nh,.true. ,bc(0,1,3),dl(1),w)
+    end if
+    if(is_bound(1,1)) then
+      if(impose_norm_bc) call set_bc2(cbc(1,1,1),1,1,nh,.false.,bc(1,1,1),dl(1),u)
+                         call set_bc2(cbc(1,1,2),1,1,nh,.true. ,bc(1,1,2),dl(1),v)
+                         call set_bc2(cbc(1,1,3),1,1,nh,.true. ,bc(1,1,3),dl(1),w)
+    end if
+    impose_norm_bc = (.not.is_correc).or.(cbc(0,2,2)//cbc(1,2,2) == 'PP')
+    if(is_bound(0,2)) then
+                         call set_bc2(cbc(0,2,1),0,2,nh,.true. ,bc(0,2,1),dl(2),u)
+      if(impose_norm_bc) call set_bc2(cbc(0,2,2),0,2,nh,.false.,bc(0,2,2),dl(2),v)
+                         call set_bc2(cbc(0,2,3),0,2,nh,.true. ,bc(0,2,3),dl(2),w)
+     end if
+    if(is_bound(1,2)) then
+                         call set_bc2(cbc(1,2,1),1,2,nh,.true. ,bc(1,2,1),dl(2),u)
+      if(impose_norm_bc) call set_bc2(cbc(1,2,2),1,2,nh,.false.,bc(1,2,2),dl(2),v)
+                         call set_bc2(cbc(1,2,3),1,2,nh,.true. ,bc(1,2,3),dl(2),w)
+    end if
+    impose_norm_bc = (.not.is_correc).or.(cbc(0,3,3)//cbc(1,3,3) == 'PP')
+    if(is_bound(0,3)) then
+                         call set_bc2(cbc(0,3,1),0,3,nh,.true. ,bc(0,3,1),dzc(0)   ,u)
+                         call set_bc2(cbc(0,3,2),0,3,nh,.true. ,bc(0,3,2),dzc(0)   ,v)
+      if(impose_norm_bc) call set_bc2(cbc(0,3,3),0,3,nh,.false.,bc(0,3,3),dzf(0)   ,w)
+    end if
+    if(is_bound(1,3)) then
+                         call set_bc2(cbc(1,3,1),1,3,nh,.true. ,bc(1,3,1),dzc(n(3)),u)
+                         call set_bc2(cbc(1,3,2),1,3,nh,.true. ,bc(1,3,2),dzc(n(3)),v)
+      if(impose_norm_bc) call set_bc2(cbc(1,3,3),1,3,nh,.false.,bc(1,3,3),dzf(n(3)),w)
+    end if
+  end subroutine bounduvw2
   subroutine boundp(cbc,n,bc_pre,nb,is_bound,dl,dzc,p)
     !
     ! imposes pressure boundary conditions
@@ -619,4 +684,258 @@ module mod_bound
     !$acc end host_data
   end subroutine updthalo_gpu
 #endif
+subroutine set_bc2(ctype,ibound,idir,nh,centered,rvalue,dr,p)
+    implicit none
+    character(len=1), intent(in) :: ctype
+    integer , intent(in) :: ibound,idir,nh
+    logical , intent(in) :: centered
+    real(rp), intent(in) :: rvalue,dr
+    real(rp), intent(inout), dimension(1-nh:,1-nh:,1-nh:) :: p
+    real(rp) :: factor,sgn
+    integer  :: n,dh
+    !
+    n = size(p,idir) - 2*nh
+    factor = rvalue
+    if(ctype == 'D'.and.centered) then
+      factor = 2.*factor
+      sgn    = -1.
+    end if
+    if(ctype == 'N') then
+      if(     ibound == 0) then
+        factor = -dr*factor ! n.b.: only valid for nh /= 1 or factor /= 0
+      else if(ibound == 1) then
+        factor =  dr*factor ! n.b.: only valid for nh /= 1 or factor /= 0
+      end if
+      sgn    = 1.
+    end if
+    !
+    do dh=0,nh-1
+      select case(ctype)
+      case('P')
+        !
+        ! n.b.: this periodic BC imposition assumes that the subroutine is only called for
+        !       for non-decomposed directions, for which n is the domain length in index space;
+        !       note that the is_bound(:,:) mask above (set under initmpi.f90) is only true along
+        !       the (undecomposed) pencil direction;
+        !       along decomposed directions, periodicity is naturally set via the halo exchange
+        !
+        select case(idir)
+        case(1)
+          !$acc kernels default(present) async(1)
+          !$OMP PARALLEL WORKSHARE
+          p(  0-dh,:,:) = p(n-dh,:,:)
+          p(n+1+dh,:,:) = p(1+dh,:,:)
+          !$OMP END PARALLEL WORKSHARE
+          !$acc end kernels
+        case(2)
+          !$acc kernels default(present) async(1)
+          !$OMP PARALLEL WORKSHARE
+          p(:,  0-dh,:) = p(:,n-dh,:)
+          p(:,n+1+dh,:) = p(:,1+dh,:)
+          !$OMP END PARALLEL WORKSHARE
+          !$acc end kernels
+        case(3)
+          !$acc kernels default(present) async(1)
+          !$OMP PARALLEL WORKSHARE
+          p(:,:,  0-dh) = p(:,:,n-dh)
+          p(:,:,n+1+dh) = p(:,:,1+dh)
+          !$OMP END PARALLEL WORKSHARE
+          !$acc end kernels
+        end select
+      case('D','N')
+        if(centered) then
+          select case(idir)
+          case(1)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(  0-dh,:,:) = factor+sgn*p(1+dh,:,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(n+1+dh,:,:) = factor+sgn*p(n-dh,:,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(2)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,  0-dh,:) = factor+sgn*p(:,1+dh,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,n+1+dh,:) = factor+sgn*p(:,n-dh,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(3)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,:,  0-dh) = factor+sgn*p(:,:,1+dh)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,:,n+1+dh) = factor+sgn*p(:,:,n-dh)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          end select
+        else if(.not.centered.and.ctype == 'D') then
+          select case(idir)
+          case(1)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(0-dh,:,:) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(n+1 ,:,:) = p(n-1,:,:) ! unused
+              p(n+dh,:,:) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(2)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,0-dh,:) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,n+1 ,:) = p(:,n-1,:) ! unused
+              p(:,n+dh,:) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(3)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,:,0-dh) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,:,n+1 ) = p(:,:,n-1) ! unused
+              p(:,:,n+dh) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          end select
+        else if(.not.centered.and.ctype == 'N') then
+          select case(idir)
+          case(1)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(0,:,:) = 1./3.*(-2.*factor+4.*p(1  ,:,:)-p(2  ,:,:))
+              p(0-dh,:,:) = 1.*factor + p(  1+dh,:,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(n,:,:) = 1./3.*(-2.*factor+4.*p(n-1,:,:)-p(n-2,:,:))
+              p(n+1,:,:) = p(n,:,:) ! unused
+              p(n+dh,:,:) = 1.*factor + p(n-1-dh,:,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(2)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(:,0  ,:) = 1./3.*(-2.*factor+4.*p(:,1,:)-p(:,2  ,:))
+              p(:,0-dh,:) = 1.*factor + p(:,  1+dh,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(:,n,:) = 1./3.*(-2.*factor+4.*p(:,n-1,:)-p(:,n-2,:))
+              p(:,n+1,:) = p(:,n,:) ! unused
+              p(:,n+dh,:) = 1.*factor + p(:,n-1-dh,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(3)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(:,:,0) = 1./3.*(-2.*factor+4.*p(:,:,1  )-p(:,:,2  ))
+              p(:,:,0-dh) = 1.*factor + p(:,:,  1+dh)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(:,:,n) = 1./3.*(-2.*factor+4.*p(:,:,n-1)-p(:,:,n-2))
+              p(:,:,n+1) = p(:,:,n) ! unused
+              p(:,:,n+dh) = 1.*factor + p(:,:,n-1-dh)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          end select
+        end if
+      end select
+    end do
+  end subroutine set_bc2
+  subroutine boundp2(cbc,n,bc,nb,is_bound,dl,dzc,p)
+    !
+    ! imposes pressure boundary conditions
+    !
+    implicit none
+    character(len=1), intent(in), dimension(0:1,3) :: cbc
+    integer , intent(in), dimension(3) :: n
+    real(rp), intent(in), dimension(0:1,3) :: bc
+    integer , intent(in), dimension(0:1,3) :: nb
+    logical , intent(in), dimension(0:1,3) :: is_bound
+    real(rp), intent(in), dimension(3 ) :: dl
+    real(rp), intent(in), dimension(0:) :: dzc
+    real(rp), intent(inout), dimension(0:,0:,0:) :: p
+    integer :: idir,nh
+    !
+    nh = 1
+    !
+#if !defined(_OPENACC)
+    do idir = 1,3
+      call updthalo(nh,halo(idir),nb(:,idir),idir,p)
+    end do
+#else
+    call updthalo_gpu(nh,cbc(0,:)//cbc(1,:)==['PP','PP','PP'],p)
+#endif
+    !
+    if(is_bound(0,1)) then
+      call set_bc2(cbc(0,1),0,1,nh,.true.,bc(0,1),dl(1),p)
+    end if
+    if(is_bound(1,1)) then
+      call set_bc2(cbc(1,1),1,1,nh,.true.,bc(1,1),dl(1),p)
+    end if
+    if(is_bound(0,2)) then
+      call set_bc2(cbc(0,2),0,2,nh,.true.,bc(0,2),dl(2),p)
+     end if
+    if(is_bound(1,2)) then
+      call set_bc2(cbc(1,2),1,2,nh,.true.,bc(1,2),dl(2),p)
+    end if
+    if(is_bound(0,3)) then
+      call set_bc2(cbc(0,3),0,3,nh,.true.,bc(0,3),dzc(0)   ,p)
+    end if
+    if(is_bound(1,3)) then
+      call set_bc2(cbc(1,3),1,3,nh,.true.,bc(1,3),dzc(n(3)),p)
+    end if
+  end subroutine boundp2
 end module mod_bound
