@@ -8,7 +8,6 @@ module mod_bound
   use mpi
   use mod_common_mpi, only: ierr,halo,ipencil_axis
   use mod_types
-  use mod_utils , only: bcStorageCreation
   implicit none
   private
   public boundp,bounduvw,updt_rhs_b, bounduvw2, boundp2
@@ -29,18 +28,6 @@ module mod_bound
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
     logical :: impose_norm_bc
     integer :: idir,nh,i,j,k
-    type  flow_data
-      real(rp), allocatable :: inf(:,:)
-      real(rp), allocatable :: outf(:,:)
-    end type flow_data
-
-    type xyz_case
-      type(flow_data) :: x, y, z
-    end type xyz_case
-
-    type  bc_direct
-      type(xyz_case) :: u, v, w
-    end type bc_direct
     type(bc_direct) :: bc_vel
     ! 
     nh = 1
@@ -189,14 +176,6 @@ module mod_bound
     real(rp), intent(in), dimension(0:) :: dzc
     real(rp), intent(inout), dimension(0:,0:,0:) :: p
     integer :: idir,nh
-    type  flow_data
-      real(rp), allocatable :: inf(:,:)
-      real(rp), allocatable :: outf(:,:)
-    end type flow_data
-
-    type xyz_case
-      type(flow_data) :: x, y, z
-    end type xyz_case
     type(xyz_case) :: bc_pre
 
     !

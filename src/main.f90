@@ -79,7 +79,7 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean,allocate_bc_vel,bcStorageCreation
+  use mod_utils          , only: bulk_mean
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
@@ -90,18 +90,6 @@ program cans
   real(rp), dimension(3) :: f
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
   real(rp):: uMean
-  type  flow_data
-    real(rp), allocatable :: inf(:,:)
-    real(rp), allocatable :: outf(:,:)
-  end type flow_data
-
-  type xyz_case
-    type(flow_data) :: x, y, z
-  end type xyz_case
-
-  type  bc_direct
-    type(xyz_case) :: u, v, w
-  end type bc_direct
   type(bc_direct):: bc_vel
   type(xyz_case):: bc_pre
 

@@ -7,7 +7,7 @@
 module mod_utils
   implicit none
   private
-  public bulk_mean,f_sizeof,swap,allocate_bc_vel,bcStorageCreation
+  public bulk_mean,f_sizeof,swap,allocate_bc_vel
   !@acc public device_memory_footprint
 contains
   subroutine allocate_bc_vel(mat,bcvel)
@@ -27,22 +27,6 @@ contains
 
   end subroutine allocate_bc_vel
 
-  subroutine bcStorageCreation()
-    use mod_types
-    type  flow_data
-      real(rp), allocatable :: inf(:,:)
-      real(rp), allocatable :: outf(:,:)
-    end type flow_data
-
-    type xyz_case
-      type(flow_data) :: x, y, z
-    end type xyz_case
-
-    type  bc_direct
-      type(xyz_case) :: u, v, w
-    end type bc_direct
-
-  end subroutine bcStorageCreation
 
   subroutine bulk_mean(n,grid_vol_ratio,p,mean)
     !

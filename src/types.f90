@@ -16,4 +16,16 @@ module mod_types
   integer, parameter, public :: rp = dp
   integer, parameter, public :: MPI_REAL_RP = MPI_DOUBLE_PRECISION
 #endif
+  type  flow_data
+    real(rp), allocatable :: inf(:,:)
+    real(rp), allocatable :: outf(:,:)
+  end type flow_data
+
+  type xyz_case
+    type(flow_data) :: x, y, z
+  end type xyz_case
+
+  type  bc_direct
+    type(xyz_case) :: u, v, w
+  end type bc_direct
 end module mod_types
