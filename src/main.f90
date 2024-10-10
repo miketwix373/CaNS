@@ -91,6 +91,7 @@ program cans
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
   real(rp),:: uMean
   type(bc_direct):: bc_vel
+  type(xyz_case):: bc_p
 
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanp
@@ -221,7 +222,14 @@ program cans
            bc_vel%w%y%inf((n1),n(2)), &
            bc_vel%w%y%outf((n1),n(2)), &
            bc_vel%w%z%inf((n1),n(2)), &
-           bc_vel%w%z%outf((n1),n(2)))           
+           bc_vel%w%z%outf((n1),n(2))) 
+  allocate(bc_p%x%inf((n2),n(3)), &
+           bc_p%x%outf((n2),n(3)), &
+           bc_p%y%inf((n1),n(3)), & 
+           bc_p%y%outf((n1),n(3)), &
+           bc_p%z%inf((n1),n(2)), &
+           bc_p%x%outf((n1),n(2)))
+            
 #endif
 #if defined(_DEBUG)
   if(myid == 0) print*, 'This executable of CaNS was built with compiler: ', compiler_version()
@@ -345,24 +353,31 @@ program cans
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
 
-  call allocate_bc_vel(bc_vel%u%x%inf,cbcvel(0,1,1))
-  call allocate_bc_vel(bc_vel%u%x%outf,cbcvel(1,1,1))
-  call allocate_bc_vel(bc_vel%u%y%inf,cbcvel(0,2,1))
-  call allocate_bc_vel(bc_vel%u%y%outf,cbcvel(1,2,1))
-  call allocate_bc_vel(bc_vel%u%z%inf,cbcvel(0,3,1))
-  call allocate_bc_vel(bc_vel%u%z%outf,cbcvel(1,3,1))
-  call allocate_bc_vel(bc_vel%v%x%inf,cbcvel(0,1,2))
-  call allocate_bc_vel(bc_vel%v%x%outf,cbcvel(1,1,2))
-  call allocate_bc_vel(bc_vel%v%y%inf,cbcvel(0,2,2))
-  call allocate_bc_vel(bc_vel%v%y%outf,cbcvel(1,2,2))
-  call allocate_bc_vel(bc_vel%v%z%inf,cbcvel(0,3,2))
-  call allocate_bc_vel(bc_vel%v%z%outf,cbcvel(1,3,2))
-  call allocate_bc_vel(bc_vel%w%x%inf,cbcvel(0,1,3))
-  call allocate_bc_vel(bc_vel%w%x%outf,cbcvel(1,1,3))
-  call allocate_bc_vel(bc_vel%w%y%inf,cbcvel(0,2,3))
-  call allocate_bc_vel(bc_vel%w%y%outf,cbcvel(1,2,3))
-  call allocate_bc_vel(bc_vel%w%z%inf,cbcvel(0,3,3))
-  call allocate_bc_vel(bc_vel%w%z%outf,cbcvel(1,3,3))
+  call allocate_bc_vel(bc_vel%u%x%inf,bcvel(0,1,1))
+  call allocate_bc_vel(bc_vel%u%x%outf,bcvel(1,1,1))
+  call allocate_bc_vel(bc_vel%u%y%inf,bcvel(0,2,1))
+  call allocate_bc_vel(bc_vel%u%y%outf,bcvel(1,2,1))
+  call allocate_bc_vel(bc_vel%u%z%inf,bcvel(0,3,1))
+  call allocate_bc_vel(bc_vel%u%z%outf,bcvel(1,3,1))
+  call allocate_bc_vel(bc_vel%v%x%inf,bcvel(0,1,2))
+  call allocate_bc_vel(bc_vel%v%x%outf,bcvel(1,1,2))
+  call allocate_bc_vel(bc_vel%v%y%inf,bcvel(0,2,2))
+  call allocate_bc_vel(bc_vel%v%y%outf,bcvel(1,2,2))
+  call allocate_bc_vel(bc_vel%v%z%inf,bcvel(0,3,2))
+  call allocate_bc_vel(bc_vel%v%z%outf,bcvel(1,3,2))
+  call allocate_bc_vel(bc_vel%w%x%inf,bcvel(0,1,3))
+  call allocate_bc_vel(bc_vel%w%x%outf,bcvel(1,1,3))
+  call allocate_bc_vel(bc_vel%w%y%inf,bcvel(0,2,3))
+  call allocate_bc_vel(bc_vel%w%y%outf,bcvel(1,2,3))
+  call allocate_bc_vel(bc_vel%w%z%inf,bcvel(0,3,3))
+  call allocate_bc_vel(bc_vel%w%z%outf,bcvel(1,3,3))
+
+  call allocate_bc_vel(bc_p%x%inf,bcpre(0,1))
+  call allocate_bc_vel(bc_p%x%outf,bcpre(1,1))
+  call allocate_bc_vel(bc_p%y%inf,bcpre(0,2))
+  call allocate_bc_vel(bc_p%y%outf,bcpre(1,2))
+  call allocate_bc_vel(bc_p%z%inf,bcpre(0,3))
+  call allocate_bc_vel(bc_p%z%outf,bcpre(1,3))
 
   call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)

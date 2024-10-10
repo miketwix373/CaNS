@@ -111,20 +111,29 @@ module mod_bound
     cbc = cbc_copy
   end subroutine bounduvw
   !
-  subroutine boundp(cbc,n,bc,nb,is_bound,dl,dzc,p)
+  subroutine boundp(cbc,n,bc_pre,nb,is_bound,dl,dzc,p)
     !
     ! imposes pressure boundary conditions
     !
     implicit none
     character(len=1), intent(in), dimension(0:1,3) :: cbc
     integer , intent(in), dimension(3) :: n
-    real(rp), intent(in), dimension(0:1,3) :: bc
     integer , intent(in), dimension(0:1,3) :: nb
     logical , intent(in), dimension(0:1,3) :: is_bound
     real(rp), intent(in), dimension(3 ) :: dl
     real(rp), intent(in), dimension(0:) :: dzc
     real(rp), intent(inout), dimension(0:,0:,0:) :: p
     integer :: idir,nh
+    type  flow_data
+      real(rp), allocatable :: inf(:,:)
+      real(rp), allocatable :: outf(:,:)
+    end type flow_data
+
+    type xyz_case
+      type(flow_data) :: x, y, z
+    end type xyz_case
+    type(xyz_case) :: bc_pre
+
     !
     nh = 1
     !
@@ -137,22 +146,22 @@ module mod_bound
 #endif
     !
     if(is_bound(0,1)) then
-      call set_bc(cbc(0,1),0,1,nh,.true.,bc(0,1),dl(1),p)
+      call set_bc(cbc(0,1),0,1,nh,.true.,bc_pre%x%inf,dl(1),p)
     end if
     if(is_bound(1,1)) then
-      call set_bc(cbc(1,1),1,1,nh,.true.,bc(1,1),dl(1),p)
+      call set_bc(cbc(1,1),1,1,nh,.true.,bc_pre%x%outf,dl(1),p)
     end if
     if(is_bound(0,2)) then
-      call set_bc(cbc(0,2),0,2,nh,.true.,bc(0,2),dl(2),p)
+      call set_bc(cbc(0,2),0,2,nh,.true.,bc_pre%y%inf,dl(2),p)
      end if
     if(is_bound(1,2)) then
-      call set_bc(cbc(1,2),1,2,nh,.true.,bc(1,2),dl(2),p)
+      call set_bc(cbc(1,2),1,2,nh,.true.,bc_pre%y%outf,dl(2),p)
     end if
     if(is_bound(0,3)) then
-      call set_bc(cbc(0,3),0,3,nh,.true.,bc(0,3),dzc(0)   ,p)
+      call set_bc(cbc(0,3),0,3,nh,.true.,bc_pre%z%inf,dzc(0)   ,p)
     end if
     if(is_bound(1,3)) then
-      call set_bc(cbc(1,3),1,3,nh,.true.,bc(1,3),dzc(n(3)),p)
+      call set_bc(cbc(1,3),1,3,nh,.true.,bc_pre%z%outf,dzc(n(3)),p)
     end if
   end subroutine boundp
   !
@@ -161,12 +170,29 @@ module mod_bound
     character(len=1), intent(in) :: ctype
     integer , intent(in) :: ibound,idir,nh
     logical , intent(in) :: centered
-    real(rp), intent(in) :: rvalue,dr
+    real(rp), intent(in) :: dr
     real(rp), intent(inout), dimension(1-nh:,1-nh:,1-nh:) :: p
-    real(rp) :: factor,sgn
+    real(rp), allocatable, dimension(:,:):: rvalue, factor
+    real(rp) ::sgn
     integer  :: n,dh
+    integer, dimension(2) :: dims
     !
     n = size(p,idir) - 2*nh
+
+    select case(idir)
+    case (1)
+      dims(1) = size(p,2)
+      dims(2) = size(p,3)
+    case (2) 
+      dims(1) = size(p,1)
+      dims(2) = size(p,3)
+    case(3)
+      dims(1) = size(p,1)
+      dims(2) = size(p,2)
+    end select    
+
+    allocate(rvalue(dims(1),dims(2)))
+    allocate(factor(dims(1),dims(2)))
     factor = rvalue
     if(ctype == 'D'.and.centered) then
       factor = 2.*factor
