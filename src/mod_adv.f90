@@ -13,25 +13,25 @@ module mod_adv
 #endif
 
   contains
-  subroutine adv(n,dt,dli,u,u_old,uBC,uMean)
-  integer, intent(in), dimension(3) :: n 
+  subroutine adv(dt,dli,u,u_old,uBC,uMean)
   real(rp), intent(in), dimension(3) :: dli
   real(rp), intent(in),dimension(0:,0:, 0:)::  u,u_old
   real(rp), intent(in):: uMean
-  real(rp), allocatable :: uBC(:,:)
-  integer :: i, j, k
+  real(rp) :: uBC(:,:)
+  integer :: i, j, k, n1, n2, nx
   real(rp), intent(in) :: dt
   real(rp):: c
   ! Initialize upast with fixed values
    ! Print the matrices
-  allocate(uBC(n(2),n(3)))
-     do i =1,n(2)
-        do j=1,n(3)
-                c             = uMean*dt/dli(1)
-                uBC(i,j)        = u_old(1,i,j)/c + (c-1)/c*u(n(1)-1,i,j)
-        end do
-        
-     end do
+  n1 = size(uBC,1)
+  n2 = size(uBC,2)
+  nx = size(u,1)
+  do i =1,n1
+    do j=1,n2
+            c             = uMean*dt/dli(1)
+            uBC(i,j)        = u_old(1,i,j)/c + (c-1)/c*u(nx-2,i,j)
+    end do
+  end do
   end subroutine adv
 
 

@@ -19,8 +19,8 @@ contains
 
     n1 = size(mat,1)
     n2 = size(mat,2)
-    do j = 1, n1
-        do i = 1, n2
+    do i = 1, n1
+        do j = 1, n2
             mat(i,j) = bcvel
         end do
     end do

@@ -79,7 +79,7 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean
+  use mod_utils          , only: bulk_mean, allocate_bc_vel
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
@@ -203,33 +203,32 @@ program cans
            rhsbw%z(n(1),n(2),0:1), &
            rhsbx(  n(2),n(3),0:1), &
            rhsby(  n(1),n(3),0:1), &
-           rhsbz(  n(1),n(2),0:1))
-  allocate(bc_vel%u%x%inf(n(2),n(3)), &
-           bc_vel%u%x%outf((n2),n(3)), &
-           bc_vel%u%y%inf((n2),n(3)), &
-           bc_vel%u%y%outf((n2),n(3)), &
-           bc_vel%u%z%inf((n2),n(3)), &
-           bc_vel%u%z%outf((n2),n(3)), &
-           bc_vel%v%x%inf((n1),n(3)), &
-           bc_vel%v%x%outf((n1),n(3)), &
-           bc_vel%v%y%inf((n1),n(3)), &
-           bc_vel%v%y%outf((n1),n(3)), &
-           bc_vel%v%z%inf((n1),n(3)), &
-           bc_vel%v%z%outf((n1),n(3)), &
-           bc_vel%w%x%inf((n1),n(2)), &
-           bc_vel%w%x%outf((n1),n(2)), &
-           bc_vel%w%y%inf((n1),n(2)), &
-           bc_vel%w%y%outf((n1),n(2)), &
-           bc_vel%w%z%inf((n1),n(2)), &
-           bc_vel%w%z%outf((n1),n(2))) 
-  allocate(bc_pre%x%inf((n2),n(3)), &
-           bc_pre%x%outf((n2),n(3)), &
-           bc_pre%y%inf((n1),n(3)), & 
-           bc_pre%y%outf((n1),n(3)), &
-           bc_pre%z%inf((n1),n(2)), &
-           bc_pre%x%outf((n1),n(2)))
-            
+           rhsbz(  n(1),n(2),0:1))                     
 #endif
+  allocate(bc_vel%u%x%inf(0:n(2)+1,0:n(3)+1), &
+           bc_vel%u%x%outf(0:n(2)+1,0:n(3)+1), &
+           bc_vel%u%y%inf(0:n(1)+1,0:n(3)+1), &
+           bc_vel%u%y%outf(0:n(1)+1,0:n(3)+1), &
+           bc_vel%u%z%inf(0:n(1)+1,0:n(2)+1), &
+           bc_vel%u%z%outf(0:n(1)+1,0:n(2)+1), &
+           bc_vel%v%x%inf(0:n(2)+1,0:n(3)+1), &
+           bc_vel%v%x%outf(0:n(2)+1,0:n(3)+1), &
+           bc_vel%v%y%inf(0:n(1)+1,0:n(3)+1), &
+           bc_vel%v%y%outf(0:n(1)+1,0:n(3)+1), &
+           bc_vel%v%z%inf(0:n(1)+1,0:n(2)+1), &
+           bc_vel%v%z%outf(0:n(1)+1,0:n(2)+1), &
+           bc_vel%w%x%inf(0:n(2)+1,0:n(3)+1), &
+           bc_vel%w%x%outf(0:n(2)+1,0:n(3)+1), &
+           bc_vel%w%y%inf(0:n(1)+1,0:n(3)+1), &
+           bc_vel%w%y%outf(0:n(1)+1,0:n(3)+1), &
+           bc_vel%w%z%inf(0:n(1)+1,0:n(2)+1), &
+           bc_vel%w%z%outf(0:n(1)+1,0:n(2)+1))
+  allocate(bc_pre%x%inf(0:n(2)+1,0:n(3)+1), &
+           bc_pre%x%outf(0:n(2)+1,0:n(3)+1), &
+           bc_pre%y%inf(0:n(1)+1,n(3)), & 
+           bc_pre%y%outf(0:n(1)+1,n(3)), &
+           bc_pre%z%inf(0:n(1)+1,0:n(2)+1), &
+           bc_pre%z%outf(0:n(1)+1,0:n(2)+1))
 #if defined(_DEBUG)
   if(myid == 0) print*, 'This executable of CaNS was built with compiler: ', compiler_version()
   if(myid == 0) print*, 'Using the options: ', compiler_options()
@@ -351,7 +350,6 @@ program cans
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
-
   call allocate_bc_vel(bc_vel%u%x%inf,bcvel(0,1,1))
   call allocate_bc_vel(bc_vel%u%x%outf,bcvel(1,1,1))
   call allocate_bc_vel(bc_vel%u%y%inf,bcvel(0,2,1))
@@ -370,7 +368,6 @@ program cans
   call allocate_bc_vel(bc_vel%w%y%outf,bcvel(1,2,3))
   call allocate_bc_vel(bc_vel%w%z%inf,bcvel(0,3,3))
   call allocate_bc_vel(bc_vel%w%z%outf,bcvel(1,3,3))
-
   call allocate_bc_vel(bc_pre%x%inf,bcpre(0,1))
   call allocate_bc_vel(bc_pre%x%outf,bcpre(1,1))
   call allocate_bc_vel(bc_pre%y%inf,bcpre(0,2))
@@ -435,15 +432,15 @@ program cans
       call bulk_forcing(n,is_forced,f,u,v,w)
 
       if (count(cbcvel(:, :, 1) == 'C') > 1) then 
-        call adv(n,dt,dl,u,upast,bc_vel%u%x%outf,uMean)
+        call adv(dt,dl,u,upast,bc_vel%u%x%outf,uMean)
       end if
 
       if (count(cbcvel(:, :, 2) == 'C') > 1) then 
-        call adv(n,dt,dl,v,vpast,bc_vel%v%x%outf,uMean)
+        call adv(dt,dl,v,vpast,bc_vel%v%x%outf,uMean)
       end if
 
       if (count(cbcvel(:, :, 3) == 'C') > 1) then 
-        call adv(n,dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
+        call adv(dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
       end if
       
 #if defined(_IMPDIFF)

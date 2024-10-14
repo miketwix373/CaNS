@@ -87,12 +87,12 @@ module mod_bound
     if(is_bound(0,3)) then
                          call set_bc(cbc(0,3,1),0,3,nh,.true. ,bc_vel%u%z%outf,dzc(0)   ,u)
                          call set_bc(cbc(0,3,2),0,3,nh,.true. ,bc_vel%v%z%outf,dzc(0)   ,v)
-      if(impose_norm_bc) call set_bc(cbc(0,3,3),0,3,nh,.false.,bc_vel%w%y%outf,dzf(0)   ,w)
+      if(impose_norm_bc) call set_bc(cbc(0,3,3),0,3,nh,.false.,bc_vel%w%z%outf,dzf(0)   ,w)
     end if
     if(is_bound(1,3)) then
-                         call set_bc(cbc(1,3,1),1,3,nh,.true. ,bc_vel%u%y%outf,dzc(n(3)),u)
-                         call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc_vel%u%y%outf,dzc(n(3)),v)
-      if(impose_norm_bc) call set_bc(cbc(1,3,3),1,3,nh,.false.,bc_vel%u%y%outf,dzf(n(3)),w)
+                         call set_bc(cbc(1,3,1),1,3,nh,.true. ,bc_vel%u%z%outf,dzc(n(3)),u)
+                         call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc_vel%u%z%outf,dzc(n(3)),v)
+      if(impose_norm_bc) call set_bc(cbc(1,3,3),1,3,nh,.false.,bc_vel%u%z%outf,dzf(n(3)),w)
     end if
 
     cbc = cbc_copy
@@ -216,7 +216,8 @@ module mod_bound
     logical , intent(in) :: centered
     real(rp), intent(in) :: dr
     real(rp), intent(inout), dimension(1-nh:,1-nh:,1-nh:) :: p
-    real(rp), allocatable, dimension(:,:):: rvalue, factor
+    real(rp), allocatable, dimension(:,:)::  factor
+    real(rp), dimension(:,:)::  rvalue
     real(rp) ::sgn
     integer  :: n,dh
     integer, dimension(2) :: dims
@@ -235,7 +236,6 @@ module mod_bound
       dims(2) = size(p,2)
     end select    
 
-    allocate(rvalue(dims(1),dims(2)))
     allocate(factor(dims(1),dims(2)))
     factor = rvalue
     if(ctype == 'D'.and.centered) then
@@ -329,7 +329,7 @@ module mod_bound
               !$acc end kernels
             else if(ibound == 1) then
               !$acc kernels default(present) async(1)
-              !$OMP PARALLEL WORKSHARE
+              !$OMP PARALLEL WORKSHARE(
               p(:,:,n+1+dh) = factor+sgn*p(:,:,n-dh)
               !$OMP END PARALLEL WORKSHARE
               !$acc end kernels
@@ -367,7 +367,7 @@ module mod_bound
               !$OMP END PARALLEL WORKSHARE
               !$acc end kernels
             end if
-          case(3)
+          case(3)        
             if     (ibound == 0) then
               !$acc kernels default(present) async(1)
               !$OMP PARALLEL WORKSHARE

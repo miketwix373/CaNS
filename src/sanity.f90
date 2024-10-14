@@ -105,7 +105,8 @@ module mod_sanity
                                       (bc01v == 'ND').or. &
                                       (bc01v == 'DN').or. &
                                       (bc01v == 'NN').or. &
-                                      (bc01v == 'DD') )
+                                      (bc01v == 'DD').or. & 
+                                      (bc01v == 'DC'))
       end do
     end do
     if(myid == 0.and.(.not.passed_loc)) print*, 'ERROR: velocity BCs not valid.'

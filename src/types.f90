@@ -28,4 +28,5 @@ module mod_types
   type  bc_direct
     type(xyz_case) :: u, v, w
   end type bc_direct
+  
 end module mod_types
