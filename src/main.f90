@@ -79,7 +79,7 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean, allocate_bc_vel
+  use mod_utils          , only: bulk_mean, allocate_bc_vel,store_field 
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
@@ -397,6 +397,7 @@ program cans
   !
   if(myid == 0) print*, '*** Calculation loop starts now ***'
   is_done = .false.
+  call store_field(trim(datadir)//'initCond.txt',[1,1,1],u)
   do while(.not.is_done)
 #if defined(_TIMING)
     !$acc wait(1)
@@ -442,6 +443,9 @@ program cans
       if (count(cbcvel(:, :, 3) == 'C') > 1) then 
         call adv(dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
       end if
+
+      call store_field(trim(datadir)//'guess.txt',[1,1,1],u)
+
       
 #if defined(_IMPDIFF)
       alpha = -.5*visc*dtrk
@@ -523,12 +527,14 @@ program cans
 #endif
       dpdl(:) = dpdl(:) + f(:)
       call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
+      call store_field(trim(datadir)//'preCorr.txt',[1,1,1],u)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
       call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.)
+      call store_field(trim(datadir)//'postCorr.txt',[1,1,1],u)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
     end do
