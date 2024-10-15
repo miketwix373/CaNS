@@ -1,6 +1,6 @@
 % Field Checker code
-path = "/home/usuario/Documentos/GitHub/CaNS/run/data/";
-file = "postCorr.txt";
+path = "/Users/miguel.perez-cuadrado/CaNS/run/data/";
+file = "initCond.txt";
 
 dataRaw = table2array(readtable(path+file));
 snap(:,:,1) = dataRaw(1:10,1:50);

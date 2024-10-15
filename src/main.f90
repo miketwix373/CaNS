@@ -79,7 +79,7 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean, allocate_bc_vel,store_field 
+  use mod_utils          , only: bulk_mean, allocate_bc_vel,store_field,store_snap
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
@@ -89,7 +89,7 @@ program cans
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
-  real(rp):: uMean
+  real(rp), allocatable , dimension(:,:):: uMean
   type(bc_direct):: bc_vel
   type(xyz_case):: bc_pre
 
@@ -108,6 +108,7 @@ program cans
   end type rhs_bound
   type(rhs_bound) :: rhsbp
   real(rp) :: alpha
+  character(len=100) :: istep_str
 #if defined(_IMPDIFF)
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanu,arrplanv,arrplanw
@@ -155,7 +156,8 @@ program cans
   savecounter = 0
   !
   ! allocate variables
-  !
+  
+  allocate(uMean(n(2),n(3)))
   allocate(u( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            v( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
@@ -352,10 +354,13 @@ program cans
   !$acc enter data copyin(u,v,w,p) create(pp)
   call allocate_bc_vel(bc_vel%u%x%inf,bcvel(0,1,1))
   call allocate_bc_vel(bc_vel%u%x%outf,bcvel(1,1,1))
+  !call store_snap(trim(datadir)//'BC111.txt',[1,1],bc_vel%u%x%outf)
   call allocate_bc_vel(bc_vel%u%y%inf,bcvel(0,2,1))
   call allocate_bc_vel(bc_vel%u%y%outf,bcvel(1,2,1))
+  !call store_snap(trim(datadir)//'BC121.txt',[1,1],bc_vel%u%y%outf)
   call allocate_bc_vel(bc_vel%u%z%inf,bcvel(0,3,1))
   call allocate_bc_vel(bc_vel%u%z%outf,bcvel(1,3,1))
+  !call store_snap(trim(datadir)//'BC131.txt',[1,1],bc_vel%u%z%outf)
   call allocate_bc_vel(bc_vel%v%x%inf,bcvel(0,1,2))
   call allocate_bc_vel(bc_vel%v%x%outf,bcvel(1,1,2))
   call allocate_bc_vel(bc_vel%v%y%inf,bcvel(0,2,2))
@@ -395,18 +400,21 @@ program cans
   !
   ! main loop
   !
+  call store_field(trim(datadir)//'initCond.txt',[1,1,1],u)
+
+
   if(myid == 0) print*, '*** Calculation loop starts now ***'
   is_done = .false.
-  call store_field(trim(datadir)//'initCond.txt',[1,1,1],u)
   do while(.not.is_done)
 #if defined(_TIMING)
     !$acc wait(1)
     dt12 = MPI_WTIME()
 #endif
     istep = istep + 1
+    write(istep_str, '(I0)') istep
     time = time + dt
     
-    call get_Umean(ng,lo,hi,l,dl,u,uMean)
+    call get_Umean(ng,lo,hi,l,dl,n,u,uMean)
 
     if (count(cbcvel(:, :, 1) == 'C') > 1) then 
       upast = u(n(1)-1:n(1)+1,:,:)
@@ -443,8 +451,9 @@ program cans
       if (count(cbcvel(:, :, 3) == 'C') > 1) then 
         call adv(dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
       end if
-
-      call store_field(trim(datadir)//'guess.txt',[1,1,1],u)
+      print *, 'Tamo aqui'
+      call store_snap(trim(datadir)//'qqq.txt',[1,1],bc_vel%u%x%outf)
+      call store_field(trim(datadir)//'guess'//trim(adjustl(istep_str))//'.txt',[1,1,1],u)
 
       
 #if defined(_IMPDIFF)
@@ -526,15 +535,15 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
-      call store_field(trim(datadir)//'preCorr.txt',[1,1,1],u)
+      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.)
+      call store_field(trim(datadir)//'preCorr'//trim(adjustl(istep_str))//'.txt',[1,1,1],u)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.)
-      call store_field(trim(datadir)//'postCorr.txt',[1,1,1],u)
+      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.)
+      call store_field(trim(datadir)//'postCorr'//trim(adjustl(istep_str))//'.txt',[1,1,1],u)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
     end do

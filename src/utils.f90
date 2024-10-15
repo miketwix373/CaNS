@@ -7,7 +7,7 @@
 module mod_utils
   implicit none
   private
-  public bulk_mean,f_sizeof,swap,allocate_bc_vel,store_field
+  public bulk_mean,f_sizeof,swap,allocate_bc_vel,store_field, store_snap
   !@acc public device_memory_footprint
 contains
   subroutine allocate_bc_vel(mat,bcvel)
@@ -75,6 +75,53 @@ contains
   ! Close the file
   call MPI_FILE_CLOSE(fh, ierr)
 end subroutine store_field
+
+subroutine store_snap(fname, nskip, p)
+    use mod_common_mpi, only: ipencil => ipencil_axis
+    use mpi
+    use mod_types
+    implicit none
+    character(len=*), intent(in) :: fname
+    integer, intent(in), dimension(2) :: nskip
+    real(rp), intent(in), dimension(:,:) :: p
+    integer :: fh, ierr, i, j
+    integer(kind=MPI_OFFSET_KIND) :: disp
+    character(len=30) :: fmt_str
+    character(len=20) :: num_str
+    character(len=:), allocatable :: line_buffer
+
+    ! Open the file
+    call MPI_FILE_OPEN(MPI_COMM_WORLD, fname, &
+        MPI_MODE_CREATE+MPI_MODE_WRONLY, MPI_INFO_NULL, fh, ierr)
+
+    ! Set the initial displacement to 0
+    disp = 0_MPI_OFFSET_KIND
+
+    ! Allocate buffer for a line of output
+    allocate(character(len=20*size(p,1)) :: line_buffer)
+
+    ! Write data in decimal format
+    do j = 1, size(p,2), nskip(2)
+        line_buffer = ''
+        do i = 1, size(p,1), nskip(1)
+            write(num_str, '(F20.6)') p(i,j) ! Convert to decimal with 6 decimal places
+            line_buffer = line_buffer // trim(adjustl(num_str)) // ' '
+        end do
+        line_buffer = trim(line_buffer) // new_line('a')
+
+        ! Write the line
+        call MPI_FILE_WRITE_AT_ALL(fh, disp, line_buffer, len_trim(line_buffer), MPI_CHARACTER, MPI_STATUS_IGNORE, ierr)
+
+        ! Update displacement
+        disp = disp + len_trim(line_buffer)
+    end do
+
+    ! Deallocate buffer
+    deallocate(line_buffer)
+
+    ! Close the file
+    call MPI_FILE_CLOSE(fh, ierr)
+end subroutine store_snap
 
   subroutine bulk_mean(n,grid_vol_ratio,p,mean)
     !

@@ -40,15 +40,16 @@ module mod_bound
         do k = 1, 3
           if (flagIF) then
             if (cbc(i,j,k) == 'C') then
-              cbc(i,j,k) = 'N'
-            else
-              cbc(i,j,k) = 'D'
+              cbc(i,j,k) = 'N'  
+            end if
+          else
+            if (cbc(i,j,k) == 'C') then
+              cbc(i,j,k) = 'D' 
             end if
           end if
         end do
       end do
     end do
- 
 #if !defined(_OPENACC)
         do idir = 1,3
           call updthalo(nh,halo(idir),nb(:,idir),idir,u)
