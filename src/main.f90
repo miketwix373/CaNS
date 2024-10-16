@@ -436,6 +436,10 @@ program cans
         call adv(dt,dl,v,vpast,bc_vel%v%x%outf,uMean)
         call adv(dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
       end if
+      
+      call store_snap(trim(datadir)//'bcu'//trim(adjustl(irk_str))//'.txt',[1,1,1],bc_vel%u%x%inf)
+      call store_snap(trim(datadir)//'bcv'//trim(adjustl(irk_str))//'.txt',[1,1,1],bc_vel%v%x%inf)
+      call store_snap(trim(datadir)//'bcw'//trim(adjustl(irk_str))//'.txt',[1,1,1],bc_vel%w%x%inf)
 
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f)
