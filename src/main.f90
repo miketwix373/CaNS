@@ -84,6 +84,7 @@ program cans
   use mod_types
   use omp_lib
   implicit none
+  logical convective_flag
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
   real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
@@ -108,7 +109,7 @@ program cans
   end type rhs_bound
   type(rhs_bound) :: rhsbp
   real(rp) :: alpha
-  character(len=100) :: istep_str
+  character(len=100) :: istep_str,irk_str
 #if defined(_IMPDIFF)
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanu,arrplanv,arrplanw
@@ -156,8 +157,8 @@ program cans
   savecounter = 0
   !
   ! allocate variables
-  
-  allocate(uMean(n(2),n(3)))
+  convective_flag = .true.
+  allocate(uMean(0:n(2)+1,0:n(3)+1))
   allocate(u( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            v( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
@@ -227,8 +228,8 @@ program cans
            bc_vel%w%z%outf(0:n(1)+1,0:n(2)+1))
   allocate(bc_pre%x%inf(0:n(2)+1,0:n(3)+1), &
            bc_pre%x%outf(0:n(2)+1,0:n(3)+1), &
-           bc_pre%y%inf(0:n(1)+1,n(3)), & 
-           bc_pre%y%outf(0:n(1)+1,n(3)), &
+           bc_pre%y%inf(0:n(1)+1,0:n(3)+1), & 
+           bc_pre%y%outf(0:n(1)+1,0:n(3)+1), &
            bc_pre%z%inf(0:n(1)+1,0:n(2)+1), &
            bc_pre%z%outf(0:n(1)+1,0:n(2)+1))
 #if defined(_DEBUG)
@@ -354,13 +355,10 @@ program cans
   !$acc enter data copyin(u,v,w,p) create(pp)
   call allocate_bc_vel(bc_vel%u%x%inf,bcvel(0,1,1))
   call allocate_bc_vel(bc_vel%u%x%outf,bcvel(1,1,1))
-  !call store_snap(trim(datadir)//'BC111.txt',[1,1],bc_vel%u%x%outf)
   call allocate_bc_vel(bc_vel%u%y%inf,bcvel(0,2,1))
   call allocate_bc_vel(bc_vel%u%y%outf,bcvel(1,2,1))
-  !call store_snap(trim(datadir)//'BC121.txt',[1,1],bc_vel%u%y%outf)
   call allocate_bc_vel(bc_vel%u%z%inf,bcvel(0,3,1))
   call allocate_bc_vel(bc_vel%u%z%outf,bcvel(1,3,1))
-  !call store_snap(trim(datadir)//'BC131.txt',[1,1],bc_vel%u%z%outf)
   call allocate_bc_vel(bc_vel%v%x%inf,bcvel(0,1,2))
   call allocate_bc_vel(bc_vel%v%x%outf,bcvel(1,1,2))
   call allocate_bc_vel(bc_vel%v%y%inf,bcvel(0,2,2))
@@ -380,7 +378,7 @@ program cans
   call allocate_bc_vel(bc_pre%z%inf,bcpre(0,3))
   call allocate_bc_vel(bc_pre%z%outf,bcpre(1,3))
 
-  call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.)
+  call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
   call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -397,11 +395,12 @@ program cans
   if(myid == 0) print*, 'dtmax = ', dtmax, 'dt = ', dt
   dti = 1./dt
   kill = .false.
+
+  call store_field(trim(datadir)//'uInit.txt',[1,1,1],u)
+
   !
   ! main loop
   !
-  call store_field(trim(datadir)//'initCond.txt',[1,1,1],u)
-
 
   if(myid == 0) print*, '*** Calculation loop starts now ***'
   is_done = .false.
@@ -411,51 +410,42 @@ program cans
     dt12 = MPI_WTIME()
 #endif
     istep = istep + 1
-    write(istep_str, '(I0)') istep
     time = time + dt
     
-    call get_Umean(ng,lo,hi,l,dl,n,u,uMean)
-
-    if (count(cbcvel(:, :, 1) == 'C') > 1) then 
-      upast = u(n(1)-1:n(1)+1,:,:)
-    end if
-
-    if (count(cbcvel(:, :, 2) == 'C') > 1) then 
-      vpast = v(n(1)-1:n(1)+1,:,:)
-    end if
-
-    if (count(cbcvel(:, :, 3) == 'C') > 1) then 
-      wpast = w(n(1)-1:n(1)+1,:,:)
-    end if
-
     if(myid == 0) print*, 'Time step #', istep, 'Time = ', time
     tauxo(:) = 0.
     tauyo(:) = 0.
     tauzo(:) = 0.
     dpdl(:)  = 0.
-    do irk=1,3
+    write(istep_str, '(I0)') istep
+
+    call store_field(trim(datadir)//'uPre.txt',[1,1,1],u)
+    !do irk=1,3
+    do irk=1,1
+      write(irk_str, '(I0)') irk
       dtrk = sum(rkcoeff(:,irk))*dt
       dtrki = dtrk**(-1)
-      call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-              is_forced,velf,bforce,u,v,w,f)
-      call bulk_forcing(n,is_forced,f,u,v,w)
 
-      if (count(cbcvel(:, :, 1) == 'C') > 1) then 
+      if (convective_flag) then 
+        upast = u(n(1)-1:n(1)+1,:,:) 
+        vpast = v(n(1)-1:n(1)+1,:,:)
+        wpast = w(n(1)-1:n(1)+1,:,:)
+
+        call get_Umean(ng,lo,hi,l,dl,n,u,uMean)
         call adv(dt,dl,u,upast,bc_vel%u%x%outf,uMean)
-      end if
-
-      if (count(cbcvel(:, :, 2) == 'C') > 1) then 
         call adv(dt,dl,v,vpast,bc_vel%v%x%outf,uMean)
-      end if
-
-      if (count(cbcvel(:, :, 3) == 'C') > 1) then 
         call adv(dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
       end if
-      print *, 'Tamo aqui'
-      call store_snap(trim(datadir)//'qqq.txt',[1,1],bc_vel%u%x%outf)
-      call store_field(trim(datadir)//'guess'//trim(adjustl(istep_str))//'.txt',[1,1,1],u)
 
-      
+      call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+              is_forced,velf,bforce,u,v,w,f)
+
+      call store_field(trim(datadir)//'uGuess'//trim(adjustl(irk_str))//'.txt',[1,1,1],u)
+        
+
+      call bulk_forcing(n,is_forced,f,u,v,w)
+
+
 #if defined(_IMPDIFF)
       alpha = -.5*visc*dtrk
       !$OMP PARALLEL WORKSHARE
@@ -535,15 +525,15 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.)
-      call store_field(trim(datadir)//'preCorr'//trim(adjustl(istep_str))//'.txt',[1,1,1],u)
+      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+      call store_field(trim(datadir)//'uBC1'//trim(adjustl(irk_str))//'.txt',[1,1,1],u)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.)
-      call store_field(trim(datadir)//'postCorr'//trim(adjustl(istep_str))//'.txt',[1,1,1],u)
+      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w)
+      call store_field(trim(datadir)//'uBC2'//trim(adjustl(irk_str))//'.txt',[1,1,1],u)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
     end do

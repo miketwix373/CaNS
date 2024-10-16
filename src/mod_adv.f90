@@ -3,21 +3,15 @@ module mod_adv
   use decomp_2d_io
   use mod_common_mpi, only:ierr,myid
   use mod_types
-  implicit none 
-    character(len=*), parameter :: fmt_dp = '(*(es24.16e3,1x))', &
-                                 fmt_sp = '(*(es15.8e2,1x))'
-#if !defined(_SINGLE_PRECISION)
-  character(len=*), parameter :: fmt_rp = fmt_dp
-#else
-  character(len=*), parameter :: fmt_rp = fmt_sp
-#endif
-
+  use mod_utils       ,only:store_snap, store_field
+  use mod_param       ,only:datadir
   contains
   subroutine adv(dt,dli,u,u_old,uBC,uMean)
   real(rp), intent(in), dimension(3) :: dli
-  real(rp), intent(in),dimension(0:,0:, 0:)::  u,u_old
+  real(rp), intent(in),dimension(0:,0:, 0:)::  u
+  real(rp), intent(in),dimension(:,0:,0:):: u_old
   real(rp), intent(in),dimension(0:,0:):: uMean
-  real(rp) :: uBC(:,:)
+  real(rp) :: uBC(0:,0:)
   integer :: i, j, k, n1, n2, nx
   real(rp), intent(in) :: dt
   real(rp):: c
@@ -26,12 +20,12 @@ module mod_adv
   n1 = size(uBC,1)
   n2 = size(uBC,2)
   nx = size(u,1)
-  do i =1,n1
-    do j=1,n2
+  do i =0,n1-1
+    do j=0,n2-1
             c             = uMean(i,j)*dt/dli(1)
-            uBC(i,j)        = u_old(1,i,j)/c + (c-1)/c*u(nx-2,i,j)
+            uBC(i,j)      = u_old(2,i,j)*(1-c) + c*u_old(1,i,j)
     end do
-  end do
+  end do  
   end subroutine adv
 
 subroutine get_Umean(ng, lo, hi, l, dl, n, p, uMeanOut)
@@ -41,7 +35,7 @@ subroutine get_Umean(ng, lo, hi, l, dl, n, p, uMeanOut)
   real(rp), intent(in), dimension(3) :: l, dl ! Domain length and grid spacing
   real(rp), intent(in), dimension(0:,0:,0:) :: p ! Input field
   real(rp), allocatable, dimension(:,:) :: uMean ! Output mean (2D array)
-  real(rp), intent(out), dimension(:,:) :: uMeanOut ! Output mean (2D array)
+  real(rp), intent(out), dimension(0:,0:) :: uMeanOut ! Output mean (2D array)
 
   ! Local variables
   integer :: np, rank, i, j, k, ierr
@@ -53,17 +47,17 @@ subroutine get_Umean(ng, lo, hi, l, dl, n, p, uMeanOut)
   call MPI_Comm_rank(comm, rank, ierr)
   call MPI_Comm_size(comm, np, ierr)
   ! Allocate arrays
-  allocate(uMean3D(ng(2),ng(3),0:np-1))
-  allocate(uMean(ng(2),ng(3)))
+  allocate(uMean3D(0:ng(2)+1,0:ng(3)+1,0:np-1))
+  allocate(uMean(0:ng(2)+1,0:ng(3)+1))
   ! Calculate x-direction element size
   dx = dl(1)
   ! Compute sum over local domain along x-direction
   !$acc parallel loop collapse(2) private(local_sum) default(present)
-  do k = 1, n(3)
-    do j = 1, n(2)
+  do k = 0, n(3) +1
+    do j = 1, n(2) +1
       local_sum = 0._rp
       !$acc loop reduction(+:local_sum)
-      do i = 1, n(1)
+      do i = 0, n(1)+1
         local_sum = local_sum + p(i,j,k)
       end do
       uMean3D(j+lo(2)-1, k+lo(3)-1, rank) = local_sum * dx
@@ -75,8 +69,8 @@ subroutine get_Umean(ng, lo, hi, l, dl, n, p, uMeanOut)
   ! Compute final average
     uMean = sum(uMean3D, dim=3) / l(1)
   deallocate(uMean3D)
-  do k = 1, n(3)
-    do j = 1, n(2)
+  do k = 0, n(3)+1
+    do j = 0, n(2)+1
       uMeanOut(j,k) = uMean(j + lo(2)-1,k+ lo(3)-1)
     end do
   end do

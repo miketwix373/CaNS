@@ -12,7 +12,7 @@ module mod_bound
   private
   public boundp,bounduvw,updt_rhs_b, bounduvw2, boundp2
   contains
-  subroutine bounduvw(cbc,n,bc_vel,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,flagIF)
+  subroutine bounduvw(cbc,n,bc_vel,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w)
     !
     ! imposes velocity boundary conditions
     !
@@ -22,7 +22,7 @@ module mod_bound
     integer , intent(in), dimension(3) :: n
     integer , intent(in), dimension(0:1,3  ) :: nb
     logical , intent(in), dimension(0:1,3  ) :: is_bound
-    logical , intent(in)           :: is_correc, flagIF
+    logical , intent(in)           :: is_correc
     real(rp), intent(in), dimension(3 ) :: dl
     real(rp), intent(in), dimension(0:) :: dzc,dzf
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
@@ -32,24 +32,8 @@ module mod_bound
     ! 
     nh = 1
     !
-    cbc_copy = cbc
     ! Modify the convective boundary conditions in the intial step
 
-    do i = 0, 1
-      do j = 1, 3
-        do k = 1, 3
-          if (flagIF) then
-            if (cbc(i,j,k) == 'C') then
-              cbc(i,j,k) = 'N'  
-            end if
-          else
-            if (cbc(i,j,k) == 'C') then
-              cbc(i,j,k) = 'D' 
-            end if
-          end if
-        end do
-      end do
-    end do
 #if !defined(_OPENACC)
         do idir = 1,3
           call updthalo(nh,halo(idir),nb(:,idir),idir,u)
@@ -95,8 +79,6 @@ module mod_bound
                          call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc_vel%u%z%outf,dzc(n(3)),v)
       if(impose_norm_bc) call set_bc(cbc(1,3,3),1,3,nh,.false.,bc_vel%u%z%outf,dzf(n(3)),w)
     end if
-
-    cbc = cbc_copy
   end subroutine bounduvw
   !
   subroutine bounduvw2(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w)

@@ -1,8 +1,10 @@
+clc
+clear
 % Field Checker code
-path = "/Users/miguel.perez-cuadrado/CaNS/run/data/";
-file = "initCond.txt";
-
+path = "/home/usuario/Documentos/GitHub/CaNS/run/data/";
+file = "uBC11.txt";
 dataRaw = table2array(readtable(path+file));
+
 snap(:,:,1) = dataRaw(1:10,1:50);
 snap(:,:,2) = dataRaw(11:20,1:50);
 snap(:,:,3) = dataRaw(21:30,1:50);

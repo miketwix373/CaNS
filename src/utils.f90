@@ -13,14 +13,14 @@ contains
   subroutine allocate_bc_vel(mat,bcvel)
     use mod_types
     implicit none
-    real(rp), intent(inout), dimension (:,:) :: mat
+    real(rp), intent(inout), dimension (0:,0:) :: mat
     integer n1,n2,i,j
     real(rp) :: bcvel
 
     n1 = size(mat,1)
     n2 = size(mat,2)
-    do i = 1, n1
-        do j = 1, n2
+    do i = 0, n1-1
+        do j = 0, n2-1
             mat(i,j) = bcvel
         end do
     end do
