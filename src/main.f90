@@ -421,7 +421,7 @@ program cans
 
     call store_field(trim(datadir)//'uPre.txt',[1,1,1],u)
     !do irk=1,3
-    do irk=1,1
+    do irk=1,3
       write(irk_str, '(I0)') irk
       dtrk = sum(rkcoeff(:,irk))*dt
       dtrki = dtrk**(-1)
@@ -437,9 +437,24 @@ program cans
         call adv(dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
       end if
       
-      call store_snap(trim(datadir)//'bcu'//trim(adjustl(irk_str))//'.txt',[1,1,1],bc_vel%u%x%inf)
-      call store_snap(trim(datadir)//'bcv'//trim(adjustl(irk_str))//'.txt',[1,1,1],bc_vel%v%x%inf)
-      call store_snap(trim(datadir)//'bcw'//trim(adjustl(irk_str))//'.txt',[1,1,1],bc_vel%w%x%inf)
+      call store_snap(trim(datadir)//'bc_u_x_inf.txt',[1,1],bc_vel%u%x%inf)
+      call store_snap(trim(datadir)//'bc_v_x_inf.txt',[1,1],bc_vel%v%x%inf)
+      call store_snap(trim(datadir)//'bc_w_x_inf.txt',[1,1],bc_vel%w%x%inf)
+      call store_snap(trim(datadir)//'bc_u_x_out.txt',[1,1],bc_vel%u%x%outf)
+      call store_snap(trim(datadir)//'bc_v_x_out.txt',[1,1],bc_vel%v%x%outf)
+      call store_snap(trim(datadir)//'bc_w_x_out.txt',[1,1],bc_vel%w%x%outf)
+      call store_snap(trim(datadir)//'bc_u_y_inf.txt',[1,1],bc_vel%u%y%inf)
+      call store_snap(trim(datadir)//'bc_v_y_inf.txt',[1,1],bc_vel%v%y%inf)
+      call store_snap(trim(datadir)//'bc_w_y_inf.txt',[1,1],bc_vel%w%y%inf)
+      call store_snap(trim(datadir)//'bc_u_y_out.txt',[1,1],bc_vel%u%y%outf)
+      call store_snap(trim(datadir)//'bc_v_y_out.txt',[1,1],bc_vel%v%y%outf)
+      call store_snap(trim(datadir)//'bc_w_y_out.txt',[1,1],bc_vel%w%y%outf)
+      call store_snap(trim(datadir)//'bc_u_z_inf.txt',[1,1],bc_vel%u%z%inf)
+      call store_snap(trim(datadir)//'bc_v_z_inf.txt',[1,1],bc_vel%v%z%inf)
+      call store_snap(trim(datadir)//'bc_w_z_inf.txt',[1,1],bc_vel%w%z%inf)
+      call store_snap(trim(datadir)//'bc_u_z_out.txt',[1,1],bc_vel%u%z%outf)
+      call store_snap(trim(datadir)//'bc_v_z_out.txt',[1,1],bc_vel%v%z%outf)
+      call store_snap(trim(datadir)//'bc_w_z_out.txt',[1,1],bc_vel%w%z%outf)
 
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f)
