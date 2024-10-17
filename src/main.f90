@@ -90,7 +90,6 @@ program cans
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
   real(rp), allocatable, dimension(:,:,:) :: upast,vpast,wpast
-  real(rp), allocatable , dimension(:,:):: uMean
   type(bc_direct):: bc_vel
   type(xyz_case):: bc_pre
 
@@ -158,7 +157,6 @@ program cans
   !
   ! allocate variables
   convective_flag = .true.
-  allocate(uMean(0:n(2)+1,0:n(3)+1))
   allocate(u( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            v( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
@@ -378,7 +376,7 @@ program cans
   call allocate_bc_vel(bc_pre%z%inf,bcpre(0,3))
   call allocate_bc_vel(bc_pre%z%outf,bcpre(1,3))
 
-  call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+  call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,ng,lo,hi,l,dt,.false.)
   call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -426,45 +424,15 @@ program cans
       dtrk = sum(rkcoeff(:,irk))*dt
       dtrki = dtrk**(-1)
 
-      if (convective_flag) then 
+      if (convective_flag) then
         upast = u(n(1)-1:n(1)+1,:,:) 
         vpast = v(n(1)-1:n(1)+1,:,:)
         wpast = w(n(1)-1:n(1)+1,:,:)
-
-        call get_Umean(ng,lo,hi,l,dl,n,u,uMean)
-        call adv(dt,dl,u,upast,bc_vel%u%x%outf,uMean)
-        call adv(dt,dl,v,vpast,bc_vel%v%x%outf,uMean)
-        call adv(dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
       end if
-      
-      call store_snap(trim(datadir)//'bc_u_x_inf.txt',[1,1],bc_vel%u%x%inf)
-      call store_snap(trim(datadir)//'bc_v_x_inf.txt',[1,1],bc_vel%v%x%inf)
-      call store_snap(trim(datadir)//'bc_w_x_inf.txt',[1,1],bc_vel%w%x%inf)
-      call store_snap(trim(datadir)//'bc_u_x_out.txt',[1,1],bc_vel%u%x%outf)
-      call store_snap(trim(datadir)//'bc_v_x_out.txt',[1,1],bc_vel%v%x%outf)
-      call store_snap(trim(datadir)//'bc_w_x_out.txt',[1,1],bc_vel%w%x%outf)
-      call store_snap(trim(datadir)//'bc_u_y_inf.txt',[1,1],bc_vel%u%y%inf)
-      call store_snap(trim(datadir)//'bc_v_y_inf.txt',[1,1],bc_vel%v%y%inf)
-      call store_snap(trim(datadir)//'bc_w_y_inf.txt',[1,1],bc_vel%w%y%inf)
-      call store_snap(trim(datadir)//'bc_u_y_out.txt',[1,1],bc_vel%u%y%outf)
-      call store_snap(trim(datadir)//'bc_v_y_out.txt',[1,1],bc_vel%v%y%outf)
-      call store_snap(trim(datadir)//'bc_w_y_out.txt',[1,1],bc_vel%w%y%outf)
-      call store_snap(trim(datadir)//'bc_u_z_inf.txt',[1,1],bc_vel%u%z%inf)
-      call store_snap(trim(datadir)//'bc_v_z_inf.txt',[1,1],bc_vel%v%z%inf)
-      call store_snap(trim(datadir)//'bc_w_z_inf.txt',[1,1],bc_vel%w%z%inf)
-      call store_snap(trim(datadir)//'bc_u_z_out.txt',[1,1],bc_vel%u%z%outf)
-      call store_snap(trim(datadir)//'bc_v_z_out.txt',[1,1],bc_vel%v%z%outf)
-      call store_snap(trim(datadir)//'bc_w_z_out.txt',[1,1],bc_vel%w%z%outf)
 
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f)
-
-      call store_field(trim(datadir)//'uGuess'//trim(adjustl(irk_str))//'.txt',[1,1,1],u)
-        
-
       call bulk_forcing(n,is_forced,f,u,v,w)
-
-
 #if defined(_IMPDIFF)
       alpha = -.5*visc*dtrk
       !$OMP PARALLEL WORKSHARE
@@ -544,15 +512,13 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
-      call store_field(trim(datadir)//'uBC1'//trim(adjustl(irk_str))//'.txt',[1,1,1],u)
+      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,ng,lo,hi,l,dtrk,convective_flag,upast,vpast,wpast)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w)
-      call store_field(trim(datadir)//'uBC2'//trim(adjustl(irk_str))//'.txt',[1,1,1],u)
+      call bounduvw(cbcvel,n,bc_vel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,ng,lo,hi,l,dtrk,convective_flag,upast,vpast,wpast)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bc_pre,nb,is_bound,dl,dzc,p)
     end do

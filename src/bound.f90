@@ -8,31 +8,36 @@ module mod_bound
   use mpi
   use mod_common_mpi, only: ierr,halo,ipencil_axis
   use mod_types
+  use mod_adv, only: get_Umean,adv
   implicit none
   private
   public boundp,bounduvw,updt_rhs_b, bounduvw2, boundp2
   contains
-  subroutine bounduvw(cbc,n,bc_vel,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w)
+  subroutine bounduvw(cbc,n,bc_vel,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,ng,lo,hi,l,dt,conv_flag,upast,vpast,wpast)
     !
     ! imposes velocity boundary conditions
     !
     implicit none
     character(len=1), dimension(0:1,3,3) :: cbc
     character(len=1), dimension(0:1,3,3) :: cbc_copy
-    integer , intent(in), dimension(3) :: n
+    integer , intent(in), dimension(3) :: n,ng,lo,hi
     integer , intent(in), dimension(0:1,3  ) :: nb
     logical , intent(in), dimension(0:1,3  ) :: is_bound
     logical , intent(in)           :: is_correc
-    real(rp), intent(in), dimension(3 ) :: dl
+    real(rp), intent(in), dimension(3 ) :: dl,l
     real(rp), intent(in), dimension(0:) :: dzc,dzf
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
-    logical :: impose_norm_bc
+    real(rp), optional, intent(in), dimension(:,0:,0:) :: upast,vpast,wpast
+    logical :: impose_norm_bc, conv_flag
     integer :: idir,nh,i,j,k
+    real(rp), allocatable , dimension(:,:):: uMean
     type(bc_direct) :: bc_vel
+    real(rp), intent(in):: dt
     ! 
     nh = 1
     !
     ! Modify the convective boundary conditions in the intial step
+    allocate(uMean(0:n(2)+1,0:n(3)+1))
 
 #if !defined(_OPENACC)
         do idir = 1,3
@@ -46,6 +51,16 @@ module mod_bound
         call updthalo_gpu(nh,cbc(0,:,3)//cbc(1,:,3)==['PP','PP','PP'],w)
 #endif
     !
+  if (conv_flag) then 
+      call get_Umean(ng,lo,hi,l,dl,n,u,uMean)
+      call adv(dt,dl,u,upast,bc_vel%u%x%outf,uMean)
+      call adv(dt,dl,v,vpast,bc_vel%v%x%outf,uMean)
+      call adv(dt,dl,w,wpast,bc_vel%w%x%outf,uMean)
+
+      print *, '--- U mean Final ----'
+      print *, uMean
+    end if
+
     impose_norm_bc = (.not.is_correc).or.(cbc(0,1,1)//cbc(1,1,1) == 'PP')
     if(is_bound(0,1)) then
       if(impose_norm_bc) call set_bc(cbc(0,1,1),0,1,nh,.false.,bc_vel%u%x%inf,dl(1),u)
@@ -56,6 +71,7 @@ module mod_bound
       if(impose_norm_bc) call set_bc(cbc(1,1,1),1,1,nh,.false.,bc_vel%u%x%outf,dl(1),u)
           call set_bc(cbc(1,1,2),1,1,nh,.true. ,bc_vel%v%x%outf,dl(1),v)
           call set_bc(cbc(1,1,3),1,1,nh,.true. ,bc_vel%w%x%outf,dl(1),w)
+
       end if
     impose_norm_bc = (.not.is_correc).or.(cbc(0,2,2)//cbc(1,2,2) == 'PP')
     if(is_bound(0,2)) then
@@ -200,7 +216,7 @@ module mod_bound
     real(rp), intent(in) :: dr
     real(rp), intent(inout), dimension(1-nh:,1-nh:,1-nh:) :: p
     real(rp), allocatable, dimension(:,:)::  factor
-    real(rp), dimension(:,:)::  rvalue
+    real(rp), dimension(0:,0:)::  rvalue
     real(rp) ::sgn
     integer  :: n,dh
     integer, dimension(2) :: dims
@@ -219,7 +235,7 @@ module mod_bound
       dims(2) = size(p,2)
     end select    
 
-    allocate(factor(dims(1),dims(2)))
+    allocate(factor(0:dims(1)-1,0:dims(2)-1))
     factor = rvalue
     if(ctype == 'D'.and.centered) then
       factor = 2.*factor

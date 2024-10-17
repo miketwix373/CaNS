@@ -28,52 +28,87 @@ module mod_adv
   end do  
   end subroutine adv
 
-subroutine get_Umean(ng, lo, hi, l, dl, n, p, uMeanOut)
-  implicit none
-  ! Input/Output arguments
-  integer, intent(in), dimension(3) :: n, ng, lo, hi ! Grid dimensions and bounds
-  real(rp), intent(in), dimension(3) :: l, dl ! Domain length and grid spacing
-  real(rp), intent(in), dimension(0:,0:,0:) :: p ! Input field
-  real(rp), allocatable, dimension(:,:) :: uMean ! Output mean (2D array)
-  real(rp), intent(out), dimension(0:,0:) :: uMeanOut ! Output mean (2D array)
+subroutine get_Umean(ng, lo, hi, l, dl, n, p, uMean)
+    implicit none
+    integer, dimension(3) :: coord, startIter, endIter, maxblock
+    integer, allocatable :: coord3d(:,:)
+    real(rp), intent(in), dimension(0:,0:,0:) :: p ! Import the field
+    integer, intent(in), dimension(3) :: ng, lo, hi, n ! Import the local and global number of cells and the limits of each stencil
+    real(rp), intent(in), dimension(3) :: dl, l ! Import the dimensions of the domain
+    integer :: i, j, k, dim, np, rank ! Create the iterators
+    real(rp), allocatable, dimension(:,:) :: uMeanLoc, uMeanGlob
+    real(rp), allocatable, dimension(:,:,:) :: uMeanLoc3d
+    real(rp), intent(inout) :: uMean(0:,0:)
+    integer :: ierr, dimn
 
-  ! Local variables
-  integer :: np, rank, i, j, k, ierr
-  real(rp), allocatable, dimension(:,:,:) :: uMean3D
-  real(rp) :: dx, local_sum
-  integer :: comm
-  ! MPI initialization
-  comm = MPI_COMM_WORLD
-  call MPI_Comm_rank(comm, rank, ierr)
-  call MPI_Comm_size(comm, np, ierr)
-  ! Allocate arrays
-  allocate(uMean3D(0:ng(2)+1,0:ng(3)+1,0:np-1))
-  allocate(uMean(0:ng(2)+1,0:ng(3)+1))
-  ! Calculate x-direction element size
-  dx = dl(1)
-  ! Compute sum over local domain along x-direction
-  !$acc parallel loop collapse(2) private(local_sum) default(present)
-  do k = 0, n(3) +1
-    do j = 1, n(2) +1
-      local_sum = 0._rp
-      !$acc loop reduction(+:local_sum)
-      do i = 0, n(1)+1
-        local_sum = local_sum + p(i,j,k)
-      end do
-      uMean3D(j+lo(2)-1, k+lo(3)-1, rank) = local_sum * dx
+    ! Identify MPI communicators
+    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+    call MPI_Comm_size(MPI_COMM_WORLD, np, ierr)
+
+    allocate(uMeanLoc(0:n(2)+1,0:n(3)+1))
+    allocate(uMeanLoc3d(0:n(2)+1,0:n(3)+1,np))
+    allocate(coord3d(3,np))
+    allocate(uMeanGlob(0:ng(2)+1,0:ng(3)+1))
+
+
+    ! initialize the mean local value
+    uMeanLoc = 0.0_rp
+    uMeanLoc3d = 0.0_rp
+    uMeanGlob = 0.0_rp
+    uMean =0.0_rp 
+
+    ! Compute the mean flow in all the stencil
+    do j=0,n(2)+1
+        do k = 0, n(3)+1
+            do i=1,n(1)
+                uMeanLoc(j,k) = uMeanLoc(j,k) + p(i,j,k)
+            end do
+        end do
     end do
-  end do
-  ! MPI reduction to get global sum
-  call MPI_ALLREDUCE(MPI_IN_PLACE, uMean3D, size(uMean3D), MPI_REAL_RP, &
-                    MPI_SUM, comm, ierr)
-  ! Compute final average
-    uMean = sum(uMean3D, dim=3) / l(1)
-  deallocate(uMean3D)
-  do k = 0, n(3)+1
-    do j = 0, n(2)+1
-      uMeanOut(j,k) = uMean(j + lo(2)-1,k+ lo(3)-1)
+    uMeanLoc = uMeanLoc * dl(1) / l(1)
+
+    coord = hi / n
+    
+    dim = (n(2)+2)*(n(3)+2)
+
+    call MPI_Allgather(uMeanLoc,dim,MPI_REAL_RP, uMeanLoc3d, dim*np,MPI_REAL_RP, MPI_COMM_WORLD,ierr)
+    call MPI_Allgather(coord, 3, MPI_INTEGER, coord3d, 3, MPI_INTEGER, MPI_COMM_WORLD, ierr)
+
+    maxblock = maxval(coord3d, dim=2)
+
+    print *, n
+
+    do i=1,np
+        startIter = [0,1,1]
+        endIter = [0,n(2),n(3)]
+        do dim = 2,3
+            if (coord3d(dim,i) == 1) then
+                startIter(dim) = 0
+            end if
+            if (coord3d(dim,i) == maxblock(dim)) then
+                endIter(dim) = n(dim) + 1
+            end if
+        end do
+        print *, 'startIter'
+        print *, startIter
+        print *, 'endIter'
+        print *, endIter
+        print *, 'coord'
+        print *, coord3d
+
+        do k = startIter(3), endIter(3)
+            do j = startIter(2), endIter(2)
+                uMeanGlob((coord3d(2,i)-1)*n(2)+j,(coord3d(3,i)-1)*n(3)+k) = &
+                    uMeanGlob((coord3d(2,i)-1)*n(2)+j,(coord3d(3,i)-1)*n(3)+k) + &
+                    uMeanLoc3d(j,k,i)        
+            end do
+        end do
     end do
-  end do
+
+
+    uMean = uMeanGlob(lo(2)-1:hi(2)+1,lo(3)-1:hi(3)+1)
+
+
 end subroutine get_Umean
 
 end module mod_adv
