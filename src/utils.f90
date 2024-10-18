@@ -5,11 +5,33 @@
 !
 ! -
 module mod_utils
+  use mod_types
   implicit none
   private
-  public bulk_mean,f_sizeof,swap
+  public bulk_mean,f_sizeof,swap,advection
+
+
   !@acc public device_memory_footprint
 contains
+  subroutine advection (n,dt,dl,upast,uMean,u_adv)
+  real(rp), intent(in), dimension(:,0:,0:) :: upast
+  real(rp), intent(inout), dimension(0:,0:) :: u_adv
+  real(rp), intent(in), dimension(0:,0:) :: uMean
+  real(rp), intent(in) :: dt, dl
+  integer,intent(in) :: n(3)
+  real(rp):: c
+  integer:: j,k
+
+  do j=0,n(2)+1
+    do k=0,n(3)+1
+      c = uMean(j,k) *dt/dl
+      u_adv(j,k) = upast(2,j,k)*(1-c)+c*upast(1,j,k)
+    end do
+  end do
+
+
+  end subroutine advection
+
   subroutine bulk_mean(n,grid_vol_ratio,p,mean)
     !
     ! compute the mean value of an observable over the entire domain

@@ -63,6 +63,7 @@ program cans
                                  datadir,   &
                                  read_input
   use mod_sanity         , only: test_sanity_input,test_sanity_solver
+  use mod_stats           , only: mean2D
 #if !defined(_OPENACC)
   use mod_solver         , only: solver
 #if defined(_IMPDIFF_1D)
@@ -78,13 +79,13 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean
+  use mod_utils          , only: bulk_mean, advection
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
   implicit none
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
-  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp
+  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
 #if !defined(_OPENACC)
@@ -95,6 +96,7 @@ program cans
   real(rp), allocatable, dimension(:,:) :: lambdaxyp
   real(rp), allocatable, dimension(:) :: ap,bp,cp
   real(rp) :: normfftp
+  real(rp), allocatable, dimension(:,:):: uMean,u_adv,v_adv,w_adv
   type rhs_bound
     real(rp), allocatable, dimension(:,:,:) :: x
     real(rp), allocatable, dimension(:,:,:) :: y
@@ -150,6 +152,13 @@ program cans
   !
   ! allocate variables
   !
+  allocate(uMean(0:n(2)+1,0:n(3)+1), &
+          u_adv(0:n(2)+1,0:n(3)+1), &
+          v_adv(0:n(2)+1,0:n(3)+1), &
+          w_adv(0:n(2)+1,0:n(3)+1) )
+  allocate(upast( 2,0:n(2)+1,0:n(3)+1), &
+           vpast( 2,0:n(2)+1,0:n(3)+1), &
+           wpast( 2,0:n(2)+1,0:n(3)+1))  
   allocate(u( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            v( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
@@ -317,7 +326,7 @@ program cans
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
-  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.)
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -351,12 +360,23 @@ program cans
     tauyo(:) = 0.
     tauzo(:) = 0.
     dpdl(:)  = 0.
+    call mean2D(ng,n,lo,hi,dl,l,u,uMean)
+    upast = u(n(1)-1:n(1),:,:)
+    vpast = v(n(1)-1:n(1),:,:)
+    wpast = w(n(1)-1:n(1),:,:)
+
     do irk=1,3
       dtrk = sum(rkcoeff(:,irk))*dt
+      call advection(n,dtrk,dl(1),upast,uMean,u_adv)
+      call advection(n,dtrk,dl(1),vpast,uMean,v_adv)
+      call advection(n,dtrk,dl(1),wpast,uMean,w_adv)
+
       dtrki = dtrk**(-1)
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f)
       call bulk_forcing(n,is_forced,f,u,v,w)
+      
+
 #if defined(_IMPDIFF)
       alpha = -.5*visc*dtrk
       !$OMP PARALLEL WORKSHARE
@@ -436,13 +456,15 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.,u_adv,v_adv,w_adv)
+!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.,u_adv,v_adv,w_adv)
+!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
     end do
