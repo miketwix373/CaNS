@@ -2,9 +2,10 @@ module mod_stats
   use mod_types
   use mpi
   use mod_common_mpi, only: ierr, myid
+  use mod_utils, only: trapezoidal_integral
   implicit none
   private
-  public mean2D
+  public mean2D, mom_thickness
 
 contains
 
@@ -86,5 +87,79 @@ contains
     deallocate(pMeanLoc, pMeanGlob, pMeanLoc3d, coord3, n3d)
 
   end subroutine mean2D
+
+  subroutine mom_thickness()
+    integer, intent(in) :: ng(3), n(3), lo(3), hi(3),dimId(2)
+    integer :: coord(3), i, j, k, nblocks(3), rank, np, startIter(2), endIter(2), dim
+    integer, dimension(:,:), allocatable :: coord3, n3d
+    real(rp), intent(in), dimension(0:,0:,0:) :: p
+    real(rp), intent(inout), dimension(0:,0:) :: pMean
+    real(rp), intent(in), dimension(3) :: dl, l
+    real(rp), dimension(:,:), allocatable :: pMeanGlob, pMeanLoc, uPlus
+    real(rp), dimension(:,:,:), allocatable :: pMeanLoc3d
+    real(rp) :: localsum, tauW
+    real(rp), intent(in), dimension(:) :: y, dy
+    real(rp), allocatable, dimension(:) :: tauLocal
+
+
+    call MPI_COMM_RANK(MPI_COMM_WORLD, rank, ierr)
+    call MPI_COMM_SIZE(MPI_COMM_WORLD, np, ierr)
+
+    ! Allocate variables
+    allocate(pMeanLoc(n(3),n(1)))
+    allocate(pMeanGlob(ng(2),ng(3)),uPlus(ng(2),ng(3)))
+    allocate(pMeanLoc3d(n(3),n(1), np))
+    allocate(coord3(3, np))
+    allocate(n3d(3, np))
+
+    ! Initialize variables
+    pMeanGlob = 0.0_rp
+    pMeanLoc = 0.0_rp
+    pMeanLoc3d = 0.0_rp
+    coord = 0
+    coord3 = 0
+
+    ! Compute the block ID positions of each of the stencils
+    coord = hi / n
+
+    ! Compute the value of pMean in the stencil face
+    do i = 1, n(1)
+      do k = 1, n(3)
+        localsum = 0.0_rp
+        do j = 1, n(2)
+          localsum = localsum + p(i,j,k) * dl(2) / l(2)
+        end do
+        pMeanLoc(k,i) = localsum
+      end do
+    end do
+
+    call MPI_Allgather(pMeanLoc, (n(3)*(n(1))), MPI_REAL_RP, &
+                       pMeanLoc3d, (n(3)*(n(1))), MPI_REAL_RP, &
+                       MPI_COMM_WORLD, ierr)
+    call MPI_Allgather(coord, 3, MPI_INTEGER, coord3, 3, MPI_INTEGER, &
+                       MPI_COMM_WORLD, ierr)
+    call MPI_Allgather(n, 3, MPI_INTEGER, n3d, 3, MPI_INTEGER, &
+                       MPI_COMM_WORLD, ierr)
+
+    nblocks = maxval(coord3, dim=2)
+
+    dimId = [1,3]
+    do j = 1, np
+      startIter = 1
+      endIter = n3d(dimId, i)
+
+      do i = startIter(1), endIter(1)
+        do k = startIter(2), endIter(2)
+          pMeanGlob((coord3(3,i)-1)*n3d(3,i)+k, (coord3(1,i)-1)*n3d(1,i)+i) = &
+            pMeanGlob((coord3(3,i)-1)*n3d(3,i)+k, (coord3(1,i)-1)*n3d(1,i)+i) + &
+            pMeanLoc3d(k,i,j)
+        end do
+      end do
+    end do
+
+    tauLocal = (pMeanGlob(2,:)-pMeanGlob(1,:))/dy(1)
+    tauW 
+
+  ens subroutine mom_thickness
 
 end module mod_stats

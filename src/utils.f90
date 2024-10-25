@@ -8,11 +8,32 @@ module mod_utils
   use mod_types
   implicit none
   private
-  public bulk_mean,f_sizeof,swap,advection
+  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral
 
 
   !@acc public device_memory_footprint
 contains
+
+contains
+  subroutine trapezoidal_integral(x, fx, n, integral) 
+      integer, intent(in) :: n
+      real(rp), dimension(:), intent(in) :: x, fx
+      real(rp) :: integral
+      integer :: i
+      
+      ! Initialize integral with first and last points (half contribution)
+      integral = 0.5_rp * (fx(1) + fx(n))
+      
+      ! Add contribution from middle points
+      do i = 2, n-1
+          integral = integral + fx(i)
+      end do
+      
+      ! Multiply by dx (assumes uniform spacing)
+      integral = integral * (x(n) - x(1)) / (n - 1)
+      
+  end subroutine trapezoidal_integral
+    
   subroutine advection (n,dt,dl,upast,uMean,u_adv)
   real(rp), intent(in), dimension(:,0:,0:) :: upast
   real(rp), intent(inout), dimension(0:,0:) :: u_adv
