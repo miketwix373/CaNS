@@ -24,7 +24,8 @@ contains
 
   do j=0,n(2)+1
     do k=0,n(3)+1
-      c = uMean(j,k) *dt/dl
+      !c = uMean(j,k) *dt/dl
+	c = dt/dl
       u_adv(j,k) = upast(2,j,k)*(1-c)+c*upast(1,j,k)
     end do
   end do
