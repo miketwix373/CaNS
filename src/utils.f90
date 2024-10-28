@@ -29,19 +29,19 @@ contains
       
   end subroutine cosine_blend_weight
 
-  subroutine fringeForce (bforce,isFringe,dt,u,utarget,lo,fringeLim,L)
+  subroutine fringeForce (bforce,isFringe,dt,u,utarget,lo,fringeLim,L,dir)
   real(rp), intent(inout), dimension(0:,0:,0:):: bforce,u
   logical, intent(in), dimension(0:,0:,0:):: isFringe
-  real(rp), intent(in) :: utarget(0:,0:,:), dt
-  integer :: i,j,k, lo(3),fringeLim,n(3),L
+  real(rp), intent(in) :: utarget(:,0:,0:), dt
+  integer :: i,j,k, lo(3),fringeLim,n(3),L,dir
   real(rp):: weight,x,fringeStart
-  n = size(bforce)
-  do i = 0, n(1)
+  n = size(isFringe,3)
+  do i = 0, (n(1)-1)
     if (isFringe(i,1,1)) then
       x = (lo(1)-1+ i)/L
       fringeStart = fringeLim/L
       call cosine_blend_weight(x,fringeStart,weight)
-      bforce(i,:,:) = weight*(u(i,:,:)-utarget)/dt
+      bforce(i,:,:) = weight*(u(i,:,:)-utarget(dir,:,:))/dt
     end if
   end do
   end subroutine fringeForce
@@ -51,8 +51,8 @@ contains
     integer, intent(in) :: loLimFringe, lo(3)
     integer :: n(3),i
 
-    n = size(isFringe,3)-2
-    do i = 0, n(1)
+    n = size(isFringe,3)
+    do i = 0, n(1)-1
       if (lo(1)-1+i > loLimFringe) then
         isFringe(i,:,:) = .true.
       end if

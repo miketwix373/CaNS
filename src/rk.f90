@@ -41,7 +41,7 @@ module mod_rk
     logical , intent(in   ),optional       :: fringe_flag
     integer , intent(in   ),optional       :: loLimFringe
     integer, intent(in   ), optional,dimension(3):: lo, ng
-    real(rp), intent(in), dimension(0:,0:,0:),optional :: utarget
+    real(rp), intent(in), dimension(:,0:,0:),optional :: utarget
     real(rp), intent(in   ), dimension(3)        :: velf,bforce
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
     real(rp), intent(out), dimension(3) :: f
@@ -53,15 +53,15 @@ module mod_rk
     logical, save :: is_first = .true.
     real(rp) :: factor1,factor2,factor12
     integer :: i,j,k
-    if (fringe_flag) then
-      real(rp), allocatable :: bforceU(:,:,:),bforceV(:,:,:),bforceW(:,:,:)
-      logical, allocatable :: isFringe(:,:,:)
+    real(rp), allocatable :: bforceU(:,:,:),bforceV(:,:,:),bforceW(:,:,:)
+    logical, allocatable :: isFringe(:,:,:)
 
-      allocate(bforceU(size(u,1),size(u,2),size(u,3)),
-              bforceV(size(u,1),size(u,2),size(u,3)),
-              bforceW(size(u,1),size(u,2),size(u,3)),
-              isFringe(size(u,1),size(u,2),size(u,3)))
-    end if 
+    allocate(bforceU(0:size(u,1)-1,0:size(u,2)-1,0:size(u,3)-1), &
+              bforceV(0:size(u,1)-1,0:size(u,2)-1,0:size(u,3)-1), &
+              bforceW(0:size(u,1)-1,0:size(u,2)-1,0:size(u,3)-1), &
+              isFringe(0:size(u,1)-1,0:size(u,2)-1,0:size(u,3)-1))
+
+    isFringe = .false.
     !
     factor1 = rkpar(1)*dt
     factor2 = rkpar(2)*dt
@@ -136,9 +136,9 @@ module mod_rk
     !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared
     if (fringe_flag) then
       call identify_fringe(isFringe,loLimFringe,lo)
-      call fringeForce(bforceU,isFringe,dt,utarget(:,:,1),lo,loLimFringe,ng(1))
-      call fringeForce(bforceV,isFringe,dt,utarget(:,:,2),lo,loLimFringe,ng(1))
-      call fringeForce(bforceW,isFringe,dt,utarget(:,:,3),lo,loLimFringe,ng(1))
+      call fringeForce(bforceU,isFringe,dt,u,utarget,lo,loLimFringe,ng(1),1)
+      call fringeForce(bforceV,isFringe,dt,v,utarget,lo,loLimFringe,ng(1),2)
+      call fringeForce(bforceW,isFringe,dt,w,utarget,lo,loLimFringe,ng(1),3)
 
     end if
 
@@ -153,13 +153,13 @@ module mod_rk
   if (fringe_flag) then 
 
           u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
-                                factor12*(bforceU - dli(1)*( p(i+1,j,k)-p(i,j,k)))
+                                factor12*(bforceU(i,j,k) - dli(1)*( p(i+1,j,k)-p(i,j,k)))
           !
           v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k) + &
-                                factor12*(bforceV - dli(2)*( p(i,j+1,k)-p(i,j,k)))
+                                factor12*(bforceV(i,j,k) - dli(2)*( p(i,j+1,k)-p(i,j,k)))
           !
           w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k) + &
-                                factor12*(bforceW - dzci(k)*(p(i,j,k+1)-p(i,j,k)))  
+                                factor12*(bforceW(i,j,k) - dzci(k)*(p(i,j,k+1)-p(i,j,k)))  
   else
           u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
                                 factor12*(bforce(1) - dli(1)*( p(i+1,j,k)-p(i,j,k)))

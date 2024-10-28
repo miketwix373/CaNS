@@ -164,7 +164,7 @@ program cans
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            p( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            pp(0:n(1)+1,0:n(2)+1,0:n(3)+1))
-    allocate(utarget( 0:n(1)+1,0:n(2)+1,3))
+    allocate(utarget(3,0:n(2)+1,0:n(3)+1))
     allocate(upc( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            vpc( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            wpc( 0:n(1)+1,0:n(2)+1,0:n(3)+1),)
@@ -382,9 +382,9 @@ program cans
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,upc,vpc,wpc,f,.false.)
 
-      utarget(:,:,1) = upc(:,:,1)
-      utarget(:,:,2) = vpc(:,:,1)
-      utarget(:,:,3) = wpc(:,:,1)
+      utarget(1,:,:) = upc(1,:,:)
+      utarget(2,:,:) = vpc(1,:,:)
+      utarget(3,:,:) = wpc(1,:,:)
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.9*ng(1)),lo,ng)        
       call bulk_forcing(n,is_forced,f,u,v,w)
