@@ -24,7 +24,7 @@ module mod_rk
   public rk
   contains
   subroutine rk(rkpar,n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-                is_forced,velf,bforce,u,v,w,f, fringe_flag,utarget,loLimFringe,lo)
+                is_forced,velf,bforce,u,v,w,f, fringe_flag,utarget,loLimFringe,lo,ng)
     !
     ! low-storage 3rd-order Runge-Kutta scheme
     ! for time integration of the momentum equations.
@@ -40,7 +40,7 @@ module mod_rk
     logical , intent(in   ), dimension(3)        :: is_forced
     logical , intent(in   ),optional       :: fringe_flag
     integer , intent(in   ),optional       :: loLimFringe
-    integer, intent(in   ), optional,dimension(3):: lo
+    integer, intent(in   ), optional,dimension(3):: lo, ng
     real(rp), intent(in), dimension(0:,0:,0:),optional :: utarget
     real(rp), intent(in   ), dimension(3)        :: velf,bforce
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
@@ -136,9 +136,9 @@ module mod_rk
     !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared
     if (fringe_flag) then
       call identify_fringe(isFringe,loLimFringe,lo)
-      call fringeForce(bforceU,isFringe,dt,utarget(:,:,1))
-      call fringeForce(bforceV,isFringe,dt,utarget(:,:,2))
-      call fringeForce(bforceW,isFringe,dt,utarget(:,:,3))
+      call fringeForce(bforceU,isFringe,dt,utarget(:,:,1),lo,loLimFringe,ng(1))
+      call fringeForce(bforceV,isFringe,dt,utarget(:,:,2),lo,loLimFringe,ng(1))
+      call fringeForce(bforceW,isFringe,dt,utarget(:,:,3),lo,loLimFringe,ng(1))
 
     end if
 
