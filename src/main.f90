@@ -85,7 +85,7 @@ program cans
   use omp_lib
   implicit none
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
-  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast
+  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast,upc,vpc,wpc,utarget
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
 #if !defined(_OPENACC)
@@ -164,6 +164,10 @@ program cans
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            p( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            pp(0:n(1)+1,0:n(2)+1,0:n(3)+1))
+    allocate(utarget( 0:n(1)+1,0:n(2)+1,3))
+    allocate(upc( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
+           vpc( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
+           wpc( 0:n(1)+1,0:n(2)+1,0:n(3)+1),)
   allocate(lambdaxyp(n_z(1),n_z(2)))
   allocate(ap(n_z(3)),bp(n_z(3)),cp(n_z(3)))
   allocate(dzc( 0:n(3)+1), &
@@ -372,8 +376,17 @@ program cans
       call advection(n,dtrk,dl(1),wpast,uMean,w_adv)
 
       dtrki = dtrk**(-1)
+      upc = u
+      vpc = v
+      wpc = w
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-              is_forced,velf,bforce,u,v,w,f)
+              is_forced,velf,bforce,upc,vpc,wpc,f,.false.)
+
+      utarget(:,:,1) = upc(:,:,1)
+      utarget(:,:,2) = vpc(:,:,1)
+      utarget(:,:,3) = wpc(:,:,1)
+      call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+              is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.9*ng(1)),lo)        
       call bulk_forcing(n,is_forced,f,u,v,w)
       
 
@@ -456,15 +469,15 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.,u_adv,v_adv,w_adv)
-!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.)
+!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.,u_adv,v_adv,w_adv)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.,u_adv,v_adv,w_adv)
-!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.)
+!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.,u_adv,v_adv,w_adv)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
     end do

@@ -17,14 +17,14 @@ module mod_rk
   use mod_mom  , only: mom_xyz_ad
 #endif
   use mod_scal , only: scal,cmpt_scalflux
-  use mod_utils, only: bulk_mean,swap
+  use mod_utils, only: bulk_mean,swap,identify_fringe,fringeForce
   use mod_types
   implicit none
   private
   public rk
   contains
   subroutine rk(rkpar,n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-                is_forced,velf,bforce,u,v,w,f)
+                is_forced,velf,bforce,u,v,w,f, fringe_flag,utarget,loLimFringe,lo)
     !
     ! low-storage 3rd-order Runge-Kutta scheme
     ! for time integration of the momentum equations.
@@ -38,6 +38,10 @@ module mod_rk
     real(rp), intent(in   ), dimension(0:) :: grid_vol_ratio_c,grid_vol_ratio_f
     real(rp), intent(in   ), dimension(0:,0:,0:) :: p
     logical , intent(in   ), dimension(3)        :: is_forced
+    logical , intent(in   ),optional       :: fringe_flag
+    integer , intent(in   ),optional       :: loLimFringe
+    integer, intent(in   ), optional,dimension(3):: lo
+    real(rp), intent(in), dimension(0:,0:,0:),optional :: utarget
     real(rp), intent(in   ), dimension(3)        :: velf,bforce
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
     real(rp), intent(out), dimension(3) :: f
@@ -49,6 +53,15 @@ module mod_rk
     logical, save :: is_first = .true.
     real(rp) :: factor1,factor2,factor12
     integer :: i,j,k
+    if (fringe_flag) then
+      real(rp), allocatable :: bforceU(:,:,:),bforceV(:,:,:),bforceW(:,:,:)
+      logical, allocatable :: isFringe(:,:,:)
+
+      allocate(bforceU(size(u,1),size(u,2),size(u,3)),
+              bforceV(size(u,1),size(u,2),size(u,3)),
+              bforceW(size(u,1),size(u,2),size(u,3)),
+              isFringe(size(u,1),size(u,2),size(u,3)))
+    end if 
     !
     factor1 = rkpar(1)*dt
     factor2 = rkpar(2)*dt
@@ -120,7 +133,15 @@ module mod_rk
 #endif
     !
     !$acc parallel loop collapse(3) default(present) async(1)
-    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared)
+    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared
+    if (fringe_flag) then
+      call identify_fringe(isFringe,loLimFringe,lo)
+      call fringeForce(bforceU,isFringe,dt,utarget(:,:,1))
+      call fringeForce(bforceV,isFringe,dt,utarget(:,:,2))
+      call fringeForce(bforceW,isFringe,dt,utarget(:,:,3))
+
+    end if
+
     do k=1,n(3)
       do j=1,n(2)
         do i=1,n(1)
@@ -129,6 +150,17 @@ module mod_rk
           v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k)
           w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k)
 #else
+  if (fringe_flag) then 
+
+          u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
+                                factor12*(bforceU - dli(1)*( p(i+1,j,k)-p(i,j,k)))
+          !
+          v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k) + &
+                                factor12*(bforceV - dli(2)*( p(i,j+1,k)-p(i,j,k)))
+          !
+          w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k) + &
+                                factor12*(bforceW - dzci(k)*(p(i,j,k+1)-p(i,j,k)))  
+  else
           u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
                                 factor12*(bforce(1) - dli(1)*( p(i+1,j,k)-p(i,j,k)))
           !
@@ -137,6 +169,7 @@ module mod_rk
           !
           w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k) + &
                                 factor12*(bforce(3) - dzci(k)*(p(i,j,k+1)-p(i,j,k)))
+  end if
 #endif
 #if defined(_IMPDIFF)
           u(i,j,k) = u(i,j,k) + factor12*dudtrkd(i,j,k)

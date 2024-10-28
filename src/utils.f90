@@ -7,14 +7,56 @@
 module mod_utils
   use mod_types
   implicit none
-  private
-  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral
+  private cosine_blend_weight
+  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral, identify_fringe,fringeForce
 
 
   !@acc public device_memory_footprint
 contains
 
 contains
+  subroutine cosine_blend_weight(x, N, weight)      
+      ! Input/Output variables
+      real(rp), intent(in)  :: x    ! Input value
+      real(rp), intent(in)  :: N    ! Lower bound (0 < N < 1)
+      real(rp), intent(out) :: weight ! Output weight
+      
+      ! Normalize x from [N,1] to [0,1]
+      x_normalized = (x - N)/(1.0_rp - N)
+      
+      ! Compute cosine blend weight: (1 - cos(π*x))/2
+      weight = (1.0_rp - cos(x_normalized * pi))/2.0_rp
+      
+  end subroutine cosine_blend_weight
+
+  subroutine fringeForce (bforce,isFringe,dt,u,utarget,lo,fringeLim,L)
+  real(rp), intent(inout), dimension(0:,0:,0:):: bforce,u
+  logical, intent(in), dimension(0:,0:,0:):: isFringe
+  real(rp), intent(in) :: utarget(0:,0:,1), dt
+  integer :: i,j,k, lo(3),fringeLim,n(3),x,L
+  real(rp):: weight
+  n = size(bforce)
+  do i = 0, n(1)
+    if (isFringe(i,1,1)) then
+      x = (lo(1)-1+ i)
+      call cosine_blend_weight(x/L,fringeLim/L,weight)
+      bforce(i,:,:) = weight*(u-utarget)/dt
+    end if
+  end do
+  end subroutine fringeForce
+
+  subroutine  identify_fringe(isFringe,loLimFringe,lo)
+    logical, dimension(:,:,:), intent(inout) :: isFringe
+    integer, intent(in) :: loLimFringe, lo(3)
+    integer :: n(3),i
+
+    n = size(isFringe,3)-2
+    do i = 0, n(1)
+      if (lo(1)-1+i > loLimFringe) then
+        isFringe(i,:,:) = .true.
+      end if
+    end do 
+  end subroutine identify_fringe
   subroutine trapezoidal_integral(x, fx, n, integral) 
       integer, intent(in) :: n
       real(rp), dimension(:), intent(in) :: x, fx
