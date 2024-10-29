@@ -382,9 +382,9 @@ program cans
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,upc,vpc,wpc,f,.false.)
 
-      utarget(1,:,:) = upc(1,:,:)
-      utarget(2,:,:) = vpc(1,:,:)
-      utarget(3,:,:) = wpc(1,:,:)
+      utarget(1,:,:) = 1._rp
+      utarget(2,:,:) = 0._rp
+      utarget(3,:,:) = 0._rp
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.9*ng(1)),lo,ng)        
       call bulk_forcing(n,is_forced,f,u,v,w)
