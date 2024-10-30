@@ -64,6 +64,8 @@ program cans
                                  read_input
   use mod_sanity         , only: test_sanity_input,test_sanity_solver
   use mod_stats           , only: mean2D
+  use mod_laminarBL       , only: initBL
+
 #if !defined(_OPENACC)
   use mod_solver         , only: solver
 #if defined(_IMPDIFF_1D)
@@ -85,7 +87,7 @@ program cans
   use omp_lib
   implicit none
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
-  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast,upc,vpc,wpc,utarget
+  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast,utarget
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
 #if !defined(_OPENACC)
@@ -165,9 +167,6 @@ program cans
            p( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            pp(0:n(1)+1,0:n(2)+1,0:n(3)+1))
     allocate(utarget(3,0:n(2)+1,0:n(3)+1))
-    allocate(upc( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
-           vpc( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
-           wpc( 0:n(1)+1,0:n(2)+1,0:n(3)+1),)
   allocate(lambdaxyp(n_z(1),n_z(2)))
   allocate(ap(n_z(3)),bp(n_z(3)),cp(n_z(3)))
   allocate(dzc( 0:n(3)+1), &
@@ -351,6 +350,8 @@ program cans
   ! main loop
   !
   if(myid == 0) print*, '*** Calculation loop starts now ***'
+  utarget = 0.0_rp
+  call initBL(1000,40.0_rp,0.05_rp,utarget,zc(1:n(3)),visc,1.0_rp)
   is_done = .false.
   do while(.not.is_done)
 #if defined(_TIMING)
@@ -376,17 +377,9 @@ program cans
       call advection(n,dtrk,dl(1),wpast,uMean,w_adv)
 
       dtrki = dtrk**(-1)
-      upc = u
-      vpc = v
-      wpc = w
-      call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-              is_forced,velf,bforce,upc,vpc,wpc,f,.false.)
 
-      utarget(1,:,:) = 1._rp
-      utarget(2,:,:) = 0._rp
-      utarget(3,:,:) = 0._rp
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-              is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.9*ng(1)),lo,ng)        
+              is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.8*ng(1)),lo,ng)        
       call bulk_forcing(n,is_forced,f,u,v,w)
       
 

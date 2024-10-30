@@ -8,11 +8,48 @@ module mod_utils
   use mod_types
   implicit none
   private 
-  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral, identify_fringe,fringeForce
+  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral, identify_fringe,fringeForce,linear_interp
 
 
   !@acc public device_memory_footprint
 contains
+  subroutine linear_interp(x, y, n, x_new, y_new, n_new)
+      integer, intent(in) :: n, n_new
+      real(dp), intent(in) :: x(n), y(n), x_new(n_new)
+      real(dp), intent(out) :: y_new(n_new)
+      
+      ! Local variables
+      integer :: i, j
+      real(dp) :: t
+      logical :: found
+      
+      
+      ! Perform interpolation
+      do i = 1, n_new
+          ! Check bounds
+          if (x_new(i) < x(1) .or. x_new(i) > x(n)) then
+              return
+          endif
+          
+          ! Find interval
+          found = .false.
+          do j = 1, n-1
+              if (x_new(i) >= x(j) .and. x_new(i) <= x(j+1)) then
+                  ! Linear interpolation formula
+                  t = (x_new(i) - x(j)) / (x(j+1) - x(j))
+                  y_new(i) = y(j) + t * (y(j+1) - y(j))
+                  found = .true.
+                  exit
+              endif
+          end do
+          
+          ! Handle exact match with last point
+          if (.not. found .and. abs(x_new(i) - x(n)) < tiny(1.0_dp)) then
+              y_new(i) = y(n)
+          endif
+      end do
+      
+  end subroutine linear_interp
   subroutine cosine_blend_weight(x, N, weight)      
       ! Input/Output variables
       real(rp), intent(in)  :: x  ! Input value
