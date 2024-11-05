@@ -6,9 +6,11 @@
 ! -
 module mod_utils
   use mod_types
+  use mpi
+  use mod_common_mpi, only: ierr, myid
   implicit none
   private 
-  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral, identify_fringe,fringeForce,linear_interp
+  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral, identify_fringe,fringeForce,linear_interp,MeanFlow2D
 
 
   !@acc public device_memory_footprint
@@ -50,6 +52,7 @@ contains
       end do
       
   end subroutine linear_interp
+
   subroutine cosine_blend_weight(x, N, weight)      
       ! Input/Output variables
       real(rp), intent(in)  :: x  ! Input value
@@ -67,20 +70,20 @@ contains
   end subroutine cosine_blend_weight
 
   subroutine fringeForce (bforce,isFringe,dt,u,utarget,lo,fringeLim,L,dir)
-  real(rp), intent(inout), dimension(0:,0:,0:):: bforce,u
-  logical, intent(in), dimension(0:,0:,0:):: isFringe
-  real(rp), intent(in) :: utarget(:,0:,0:), dt
-  integer :: i,j,k, lo(3),fringeLim,n,L,dir
-  real(rp):: weight,x,fringeStart
-  n = size(isFringe,1)
-  do i = 0, (n-1)
-    if (isFringe(i,1,1)) then
-      x = (lo(1)-1+ i)/L
-      fringeStart = fringeLim/L
-      call cosine_blend_weight(x,fringeStart,weight)
-      bforce(i,:,:) = -weight*(u(i,:,:)-utarget(dir,:,:))/dt
-    end if
-  end do
+    real(rp), intent(inout), dimension(0:,0:,0:):: bforce,u
+    logical, intent(in), dimension(0:,0:,0:):: isFringe
+    real(rp), intent(in) :: utarget(:,0:,0:), dt
+    integer :: i,j,k, lo(3),fringeLim,n,L,dir
+    real(rp):: weight,x,fringeStart
+    n = size(isFringe,1)
+    do i = 0, (n-1)
+      if (isFringe(i,1,1)) then
+        x = (lo(1)-1+ i)/L
+        fringeStart = fringeLim/L
+        call cosine_blend_weight(x,fringeStart,weight)
+        bforce(i,:,:) = -weight*(u(i,:,:)-utarget(dir,:,:))/dt
+      end if
+    end do
   end subroutine fringeForce
 
   subroutine  identify_fringe(isFringe,loLimFringe,lo)
@@ -95,6 +98,7 @@ contains
       end if
     end do 
   end subroutine identify_fringe
+
   subroutine trapezoidal_integral(x, fx, n, integral) 
       integer, intent(in) :: n
       real(rp), dimension(:), intent(in) :: x, fx
@@ -113,7 +117,142 @@ contains
       integral = integral * (x(n) - x(1)) / (n - 1)
       
   end subroutine trapezoidal_integral
-    
+
+  subroutine MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean,idir)
+    integer, intent(in) :: ng(3), n(3), lo(3), hi(3),idir
+    integer :: coord(3), i, j, k, nblocks(3), rank, np, startIter(2),&
+    endIter(2), dim, nrows, ncols, ngrows, ngcols, nmean, ngmean, &
+    blockSelect(2),row, nblock(2), nblocksCol, nblocksRow
+    integer, dimension(:,:), allocatable :: coord3, n3d
+    real(rp), intent(in), dimension(0:,0:,0:) :: p
+    real(rp), intent(inout), dimension(0:,0:) :: pMean
+    real(rp), intent(in), dimension(3) :: dl, l
+    real(rp), dimension(:,:), allocatable :: pMeanGlob, pMeanLoc
+    real(rp), dimension(:,:,:), allocatable :: pMeanLoc3d
+    real(rp) :: localsum
+    integer, dimension(:), allocatable :: maxn
+
+    call MPI_COMM_RANK(MPI_COMM_WORLD, rank, ierr)
+    call MPI_COMM_SIZE(MPI_COMM_WORLD, np, ierr)
+
+    select case (idir) 
+      case(1)
+        ncols  = n(2)
+        nrows  = n(3)
+        ngcols = ng(2)
+        ngrows = ng(3)
+        nmean = n(1)
+        ngmean = ng(1)
+      case (2)
+        ncols  = n(1)
+        nrows  = n(3)
+        ngcols = ng(1)
+        ngrows = ng(3)
+        nmean = n(2)
+        ngmean = ng(2)
+      case (3)
+        ncols  = n(2)
+        nrows  = n(1)
+        ngcols = ng(2)
+        ngrows = ng(1)
+        nmean = n(3)
+        ngmean = ng(3)
+    end select
+
+    ! Allocate variables
+    allocate(pMeanLoc(0:nrows+1, 0:ncols+1))
+    allocate(pMeanGlob(0:ngrows+1, 0:ngrows+1))
+    allocate(pMeanLoc3d(0:ngrows+1, 0:ngrows+1, np))
+    allocate(coord3(3, np))
+    allocate(n3d(3, np))
+    allocate(maxn(np))
+
+    ! Initialize variables
+    pMeanGlob = 0.0_rp
+    pMeanLoc = 0.0_rp
+    pMeanLoc3d = 0.0_rp
+    coord = 0
+    coord3 = 0
+
+    ! Compute the block ID positions of each of the stencils
+    coord = hi / n
+
+    ! Compute the value of pMean in the stencil face
+    do i = 0, nrows+1
+      do j = 0, ncols+1
+        localsum = 0.0_rp
+        do k = 1, nmean
+        select case (idir)
+          case (1)
+            localsum = localsum + p(k,j,i) * dl(1) / l(1)
+          case (2)
+            localsum = localsum + p(j,k,i) * dl(2) / l(2)
+          case(3)
+            localsum = localsum + p(i,j,k) * dl(3) / l(3)
+        end select
+        end do
+        pMeanLoc(i,j) = localsum
+      end do
+    end do
+
+    call MPI_Allgather(pMeanLoc, (nrows+2)*(ncols+2), MPI_REAL_RP, &
+                       pMeanLoc3d, (nrows+2)*(ncols+2), MPI_REAL_RP, &
+                       MPI_COMM_WORLD, ierr)
+    call MPI_Allgather(coord, 3, MPI_INTEGER, coord3, 3, MPI_INTEGER, &
+                       MPI_COMM_WORLD, ierr)
+    call MPI_Allgather(n, 3, MPI_INTEGER, n3d, 3, MPI_INTEGER, &
+                       MPI_COMM_WORLD, ierr)
+
+    select case(idir)
+      case (1)
+        blockSelect = (3,2)
+      case(2)
+        blockSelect = (3,1)
+      case(3)
+        blockSelect = (1,2)
+    end select
+    maxn = coord3(blockSelect(1),:)
+    nblocksRow = maxval(maxn)
+    maxn = coord3(blockSelect(2),:)
+    nblocksCol = maxval(maxn)
+    nblock = [nblocksRow,nblocksCol]
+    do k = 1, np
+      startIter = 1
+      endIter = n3d(blockSelect, i)
+
+      do row = 1, 2
+        if (coord3(blockSelect(row), i) == 1) then
+          startIter(row) = 0
+        end if
+        if (coord3(blockSelect(row), i) == nblock(row)) then
+          endIter(row) = endIter(row) + 1
+        end if
+      end do
+
+
+      do i = startIter(1), endIter(1)
+        do j = startIter(2), endIter(2)
+
+        select case (idir)
+          case(1)
+            pMeanGlob((coord3(3,k)-1)*n3d(3,k)+i, (coord3(2,k)-1)*n3d(2,k)+j) = &
+            pMeanGlob((coord3(3,k)-1)*n3d(3,k)+i, (coord3(2,k)-1)*n3d(2,k)+j) + &
+            pMeanLoc3d(k,j,i)
+          case(2)
+            pMeanGlob((coord3(3,k)-1)*n3d(3,k)+i, (coord3(1,k)-1)*n3d(1,k)+j) = &
+            pMeanGlob((coord3(3,k)-1)*n3d(3,k)+i, (coord3(1,k)-1)*n3d(1,k)+j) + &
+            pMeanLoc3d(j,k,i)
+          case(3)
+            pMeanGlob((coord3(1,k)-1)*n3d(1,k)+i, (coord3(2,k)-1)*n3d(2,k)+j) = &
+            pMeanGlob((coord3(1,k)-1)*n3d(1,k)+i, (coord3(2,k)-1)*n3d(2,k)+j) + &
+            pMeanLoc3d(i,j,k)
+        end select
+        end do
+      end do
+    end do
+
+  end subroutine MeanFlow2D
+
   subroutine advection (n,dt,dl,upast,uMean,u_adv)
   real(rp), intent(in), dimension(:,0:,0:) :: upast
   real(rp), intent(inout), dimension(0:,0:) :: u_adv
