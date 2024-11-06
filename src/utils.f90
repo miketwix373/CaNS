@@ -118,7 +118,7 @@ contains
       
   end subroutine trapezoidal_integral
 
-  subroutine MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean,idir)
+  subroutine MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean,idir,localFlag)
     integer, intent(in) :: ng(3), n(3), lo(3), hi(3),idir
     integer :: coord(3), i, j, k, nblocks(3), rank, np, startIter(2),&
     endIter(2), dim, nrows, ncols, ngrows, ngcols, nmean, ngmean, &
@@ -130,6 +130,7 @@ contains
     real(rp), dimension(:,:), allocatable :: pMeanGlob, pMeanLoc
     real(rp), dimension(:,:,:), allocatable :: pMeanLoc3d
     real(rp) :: localsum
+    logical, intent(in):: localFlag
     integer, dimension(:), allocatable :: maxn
 
     call MPI_COMM_RANK(MPI_COMM_WORLD, rank, ierr)
@@ -250,7 +251,12 @@ contains
         end do
       end do
     end do
-
+    if (localFlag) then
+      pMean = pMeanGlob(lo(blockSelect(1))-1:hi(blockSelect(1))+1,&
+      lo(blockSelect(2))-1:hi(blockSelect(2))+1)
+    else
+      pMean = pMeanGlob
+    end if
   end subroutine MeanFlow2D
 
   subroutine advection (n,dt,dl,upast,uMean,u_adv)

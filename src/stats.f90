@@ -2,10 +2,10 @@ module mod_stats
   use mod_types
   use mpi
   use mod_common_mpi, only: ierr, myid
-  use mod_utils, only: trapezoidal_integral
+  use mod_utils, only: trapezoidal_integral, MeanFlow2D
   implicit none
   private
-  public mean2D
+  public mean2D, fluctuations
 
 contains
 
@@ -87,5 +87,73 @@ contains
     deallocate(pMeanLoc, pMeanGlob, pMeanLoc3d, coord3, n3d)
 
   end subroutine mean2D
+
+  subroutine fluctuations (p,pFluct,n,ng,lo,hi,dl,l)
+    real(rp), dimension(0:,0:,0:,:), intent(in) :: p
+    real(rp), dimension(0:,0:,:), intent(inout) :: pFluct
+    real(rp), allocatable :: pMeanInstant(:,:,:), flowInstant(:,:,:)
+    real(rp), allocatable :: pMean (:,:), pMeanTemp (:,:)
+    integer:: nSnaps,i
+    integer, intent(in):: n(3), ng(3), lo(3), hi(3)
+    real(rp), intent(in):: l(3), dl(3)
+
+    nSnaps = size(p, dim=4)
+
+    allocate(pMeanInstant(0:n(3)+1,0:n(1)+1,nSnaps))
+    allocate(flowInstant(0:n(1)+1,0:n(2)+1,0:n(3)+1))
+    allocaTE(pMean(0:n(3)+1,0:n(1)+1))
+    allocate(pMeanTemp(0:n(3)+1,0:n(1)+1))
+    do i=1,nSnaps
+      flowInstant = p(:,:,:,i)
+      call MeanFlow2D(ng,n,lo,hi,dl,l,flowInstant,pMeanTemp,2,.true.)
+      pMeanInstant(:,:,i) = pMeanTemp
+    end do
+
+    pMean = sum(pMeanInstant, dim=3)/nSnaps
+
+    do i=1,nSnaps
+      pFluct(:,:,i) = pMeanInstant(:,:,i)-pMean
+    end do
+
+  end subroutine fluctuations
+
+  subroutine displ_thickness(p,n,ng,lo,hi,dl,l,delta99,zcg)
+    real(rp), dimension(0:,0:,0:), intent(in):: p
+    real(rp), intent(in) :: dl(3),l(3),zcg(:),delta99(:)
+    integer,intent(in) :: n(3),ng(3),lo(3),hi(3)
+    real(rp), allocatable :: uinf(:),pMean(:,:),sliceVel(:)
+    integer:: i
+
+    allocate(pMean(0:ng(3)+1,0:ng(1)+1))
+    allocate(uinf(0:ng(1)+1))
+    allocate(sliceVel(0:ng(3)+1))
+    call MeanFlow2D(ng,n,lo,hi,dl,l,p,pMean,2,.false.)
+
+    uinf = pMean(ng(3),:)
+
+    do i=1,ng(1)
+      sliceVel = pMean(:,i)
+      call linear_interp(sliceVel(1:ng(3)),zcg,ng(3),0.99*uinf(i),delta99(i),1)
+    end do
+  end subroutine displ_thickness
+
+  subroutine get_wss(p,n,ng,lo,hi,dl,l,wss,uTau,zcg,visc)
+    real(rp), dimension(0:,0:,0:), intent(in):: p
+    real(rp), intent(in) :: dl(3),l(3),zcg(:),visc
+    real(rp), intent(inout) ::wss(:),uTau(:)
+    integer,intent(in) :: n(3),ng(3),lo(3),hi(3)
+    real(rp), allocatable :: uinf(:) ,pMean(:,:),sliceVel(:)
+    integer:: i
+
+    allocate(pMean(0:ng(3)+1,0:ng(1)+1))
+    allocate(uinf(0:ng(1)+1))
+    allocate(sliceVel(0:ng(3)+1))
+    call MeanFlow2D(ng,n,lo,hi,dl,l,p,pMean,2,.false.)
+
+    do i=1,ng(1)
+      wss(i) = (pMean(2,i)-pMean(1,i))/(zcg(2)-zcg(1))
+      uTau(i) = sqrt(visc*wss(i))
+    end do
+  end subroutine get_wss
 
 end module mod_stats
