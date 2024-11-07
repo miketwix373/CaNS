@@ -10,11 +10,38 @@ module mod_utils
   use mod_common_mpi, only: ierr, myid
   implicit none
   private 
-  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral, identify_fringe,fringeForce,linear_interp,MeanFlow2D
+  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral, identify_fringe,fringeForce,linear_interp,MeanFlow2D,sort_couple
 
 
   !@acc public device_memory_footprint
 contains
+  subroutine sort_couple(vec_a, vec_b)
+      real(rp), dimension(:), intent(inout) :: vec_a  ! Vector to sort by
+      real(rp), dimension(:), intent(inout) :: vec_b  ! Related vector
+      integer :: i, j, n
+      real(rp) :: temp_a, temp_b
+      
+      ! Check if vectors have same size
+      n = size(vec_a)
+      
+      ! Bubble sort implementation
+      do i = 1, n-1
+          do j = 1, n-i
+              if (vec_a(j) > vec_a(j+1)) then
+                  ! Swap elements in vec_a
+                  temp_a = vec_a(j)
+                  vec_a(j) = vec_a(j+1)
+                  vec_a(j+1) = temp_a
+                  
+                  ! Swap corresponding elements in vec_b
+                  temp_b = vec_b(j)
+                  vec_b(j) = vec_b(j+1)
+                  vec_b(j+1) = temp_b
+              end if
+          end do
+      end do
+  end subroutine sort_couple
+
   subroutine linear_interp(x, y, n, x_new, y_new, n_new)
       integer, intent(in) :: n, n_new
       real(dp), intent(in) :: x(n), y(n), x_new(n_new)
@@ -271,7 +298,7 @@ contains
   do j=0,n(2)+1
     do k=0,n(3)+1
       !c = uMean(j,k) *dt/dl
-	c = dt/dl
+	    c = dt/dl
       u_adv(j,k) = upast(2,j,k)*(1-c)+c*upast(1,j,k)
     end do
   end do

@@ -2,7 +2,7 @@ module mod_stats
   use mod_types
   use mpi
   use mod_common_mpi, only: ierr, myid
-  use mod_utils, only: trapezoidal_integral, MeanFlow2D
+  use mod_utils, only: trapezoidal_integral, MeanFlow2D,sort_couple
   implicit none
   private
   public mean2D, fluctuations
@@ -156,4 +156,95 @@ contains
     end do
   end subroutine get_wss
 
+  subroutine bl_stats(fname, n, ng, lo, hi, dl, l, u, v, w, zcg, visc)
+    character(len=*), intent(in) :: fname
+    integer, intent(in) :: n(3), ng(3), lo(3), hi(3)
+    real(rp), intent(in) :: visc, dl(:), l(3)
+    real(rp), intent(in) :: u(0:,0:,0:), v(0:,0:,0:), w(0:,0:,0:), zcg(:)
+    
+    ! Local variables
+    real(rp), allocatable :: delta99(:), wss(:), uTau(:), lscale(:), delta99plus(:)
+    real(rp), allocatable :: yplus(:,:), uPlus(:,:), uMean(:,:), uInf(:)
+    real(rp), allocatable :: yPlusTemp(:), uPlusTemp(:), integrand(:)
+    real(rp), allocatable :: reDelta(:), reTheta(:)
+    integer :: i, npoints, idLimit, j
+    real(rp) :: delta99u
+
+
+    ! Fix 2: Correct allocation sizes
+    allocate(delta99(ng(1)), wss(ng(1)), uTau(ng(1)), lscale(ng(1)), delta99plus(ng(1)))
+    allocate(yPlus(ng(3),ng(1)))
+    allocate(uPlus(ng(3),ng(1)), uMean(0:ng(3)+1,0:ng(1)+1), uInf(ng(1)))
+    allocate(yPlusTemp(ng(3)+1), uPlusTemp(ng(3)+1))
+    allocate(reDelta(ng(1)), reTheta(ng(1)))
+
+    ! Fix 3: Initialize arrays
+    yPlusTemp = 0.0_rp
+    uPlusTemp = 0.0_rp
+    delta99 = 0.0_rp
+    wss = 0.0_rp
+    uTau = 0.0_rp
+
+    ! Calculate mean flow and boundary layer parameters
+    call Meanflow2D(ng, n, lo, hi, dl, l, u, uMean, 2, .false.)
+    call displ_thickness(u, n, ng, lo, hi, dl, l, delta99, zcg)
+    call get_wss(u, n, ng, lo, hi, dl, l, wss, uTau, zcg, visc)
+
+    ! Fix 4: Add check for zero uTau
+    if (any(uTau <= 0.0_rp)) then
+        print *, "Error: Zero or negative friction velocity detected"
+        return
+    end if
+
+    lscale = visc/uTau
+    delta99plus = delta99/lscale
+    uInf = uMean(ng(3),1:ng(1))
+
+    do i = 1, ng(1)
+        ! Fix 5: Clear temporary arrays for each iteration
+        uPlusTemp = 0.0_rp
+        yPlusTemp = 0.0_rp
+        
+        yPlus(:,i) = zcg/lscale(i)
+        uPlus(:,i) = uMean(1:ng(3),i)/uTau(i)  ! Fix 6: Correct array indexing
+        
+        yPlusTemp(1:ng(3)) = yPlus(:,i)
+        uPlusTemp(1:ng(3)) = uPlus(:,i)
+        
+
+        call linear_interp(yPlusTemp, uPlusTemp, ng(3)+1, delta99(i), delta99u, 1)
+        
+        yPlusTemp(ng(3)+1) = delta99(i)
+        uPlusTemp(ng(3)+1) = delta99u
+
+        ! Fix 8: Add error checking for sorting
+        call sort_couple(yPlusTemp, uPlusTemp)
+
+        ! Fix 9: Reset idLimit for each iteration
+        idLimit = 0
+        do j = 1, ng(3)+1
+            if (yPlusTemp(j) <= delta99(i)) then
+                idLimit = idLimit + 1
+            end if
+        end do
+
+        allocate(integrand(idLimit))
+
+        ! Calculate displacement and momentum thickness
+        integrand = 1.0_rp - (uPlusTemp(1:idLimit)/(uInf(i)/uTau(i)))
+        call trapezoidal_integral(yPlusTemp(1:idLimit), integrand, idLimit, reDelta(i))
+        
+        integrand = (1.0_rp - (uPlusTemp(1:idLimit)/(uInf(i)/uTau(i)))) * &
+                   (uPlusTemp(1:idLimit)/(uInf(i)/uTau(i)))
+        call trapezoidal_integral(yPlusTemp(1:idLimit), integrand, idLimit, reTheta(i))
+    end do
+
+    ! Fix 11: Deallocate arrays before exiting
+    deallocate(integrand)
+    deallocate(delta99, wss, uTau, lscale, delta99plus)
+    deallocate(yPlus, uPlus, uMean, uInf)
+    deallocate(yPlusTemp, uPlusTemp)
+    deallocate(reDelta, reTheta)
+
+end subroutine bl_stats
 end module mod_stats

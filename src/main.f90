@@ -98,7 +98,7 @@ program cans
   real(rp), allocatable, dimension(:,:) :: lambdaxyp
   real(rp), allocatable, dimension(:) :: ap,bp,cp
   real(rp) :: normfftp
-  real(rp), allocatable, dimension(:,:):: uMean,u_adv,v_adv,w_adv
+  real(rp), allocatable, dimension(:,:):: uMean,u_adv,v_adv,w_adv,uinf,vinf,winf
   type rhs_bound
     real(rp), allocatable, dimension(:,:,:) :: x
     real(rp), allocatable, dimension(:,:,:) :: y
@@ -158,6 +158,9 @@ program cans
           u_adv(0:n(2)+1,0:n(3)+1), &
           v_adv(0:n(2)+1,0:n(3)+1), &
           w_adv(0:n(2)+1,0:n(3)+1) )
+    allocate(uinf(0:n(2)+1,0:n(3)+1), &
+          vinf(0:n(2)+1,0:n(3)+1), &
+          winf(0:n(2)+1,0:n(3)+1))        
   allocate(upast( 2,0:n(2)+1,0:n(3)+1), &
            vpast( 2,0:n(2)+1,0:n(3)+1), &
            wpast( 2,0:n(2)+1,0:n(3)+1))  
@@ -329,7 +332,7 @@ program cans
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
-  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.)
+  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.)
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -352,6 +355,11 @@ program cans
   if(myid == 0) print*, '*** Calculation loop starts now ***'
   utarget = 0.0_rp
   call initBL(1000,40.0_rp,0.05_rp,utarget,zc(1:n(3)),visc,1.0_rp)
+  
+  uinf = utarget(1,:,:)
+  vinf = utarget(2,:,:)
+  winf = utarget(2,:,:)
+
   is_done = .false.
   do while(.not.is_done)
 #if defined(_TIMING)
@@ -370,7 +378,8 @@ program cans
     vpast = v(n(1)-1:n(1),:,:)
     wpast = w(n(1)-1:n(1),:,:)
 
-    do irk=1,3
+    do irk=1,1
+    
       dtrk = sum(rkcoeff(:,irk))*dt
       call advection(n,dtrk,dl(1),upast,uMean,u_adv)
       call advection(n,dtrk,dl(1),vpast,uMean,v_adv)
@@ -378,8 +387,10 @@ program cans
 
       dtrki = dtrk**(-1)
 
+      !call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+      !        is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.8*ng(1)),lo,ng)     
       call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-              is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.8*ng(1)),lo,ng)        
+              is_forced,velf,bforce,u,v,w,f,.false.)       
       call bulk_forcing(n,is_forced,f,u,v,w)
       
 
@@ -462,15 +473,15 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.,u_adv,v_adv,w_adv)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf)
+!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.,u_adv,v_adv,w_adv)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf)
+!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.,.false.)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
     end do

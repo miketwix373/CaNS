@@ -44,7 +44,6 @@ contains
         call linear_interp(eta,fp, n_points, etaEval,fpEval,n)
 
         x = thick0**2*ubulk/visc
-        print *, etaEval
         do i=1,n
             u(1,:,i) = ubulk*fpEval(i) 
             u(2,:,:) = 0.0_rp

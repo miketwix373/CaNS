@@ -38,7 +38,7 @@ module mod_rk
     real(rp), intent(in   ), dimension(0:) :: grid_vol_ratio_c,grid_vol_ratio_f
     real(rp), intent(in   ), dimension(0:,0:,0:) :: p
     logical , intent(in   ), dimension(3)        :: is_forced
-    logical , intent(in   ),optional       :: fringe_flag
+    logical , intent(in   )       :: fringe_flag
     integer , intent(in   ),optional       :: loLimFringe
     integer, intent(in   ), optional,dimension(3):: lo, ng
     real(rp), intent(in), dimension(:,0:,0:),optional :: utarget
