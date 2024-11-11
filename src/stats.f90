@@ -2,11 +2,17 @@ module mod_stats
   use mod_types
   use mpi
   use mod_common_mpi, only: ierr, myid
-  use mod_utils, only: trapezoidal_integral, MeanFlow2D,sort_couple
+  use mod_utils, only: trapezoidal_integral, MeanFlow2D,sort_couple, linear_interp
   implicit none
   private
-  public mean2D, fluctuations
-
+  public mean2D, fluctuations, bl_stats
+  character(len=*), parameter :: fmt_dp = '(*(es24.16e3,1x))', &
+                                 fmt_sp = '(*(es15.8e2,1x))'
+#if !defined(_SINGLE_PRECISION)
+  character(len=*), parameter :: fmt_rp = fmt_dp
+#else
+  character(len=*), parameter :: fmt_rp = fmt_sp
+#endif
 contains
 
   subroutine mean2D(ng, n, lo, hi, dl, l, p, pMean)
@@ -117,25 +123,46 @@ contains
 
   end subroutine fluctuations
 
-  subroutine displ_thickness(p,n,ng,lo,hi,dl,l,delta99,zcg)
-    real(rp), dimension(0:,0:,0:), intent(in):: p
-    real(rp), intent(in) :: dl(3),l(3),zcg(:),delta99(:)
-    integer,intent(in) :: n(3),ng(3),lo(3),hi(3)
-    real(rp), allocatable :: uinf(:),pMean(:,:),sliceVel(:)
-    integer:: i
-
-    allocate(pMean(0:ng(3)+1,0:ng(1)+1))
+subroutine displ_thickness(p, n, ng, lo, hi, dl, l, delta99, zcg)
+    real(rp), dimension(0:,0:,0:), intent(in) :: p
+    real(rp), intent(in) :: dl(3), l(3), zcg(:)
+    integer, intent(in) :: n(3), ng(3), lo(3), hi(3)
+    real(rp), intent(out) :: delta99(:)
+    
+    ! Local variables
+    real(rp), allocatable :: uinf(:), pMean(:,:), sliceVel(:), velTemp(:), thickTemp(:)
+    integer :: i
+    
+    ! Allocate arrays
+    allocate(pMean(0:ng(3)+1, 0:ng(1)+1))
     allocate(uinf(0:ng(1)+1))
     allocate(sliceVel(0:ng(3)+1))
-    call MeanFlow2D(ng,n,lo,hi,dl,l,p,pMean,2,.false.)
-
+    allocate(velTemp(1), thickTemp(1))
+    
+    ! Calculate mean flow field
+    call MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean, 2, .false.)
+    
+    ! Get free-stream velocity
     uinf = pMean(ng(3),:)
-
-    do i=1,ng(1)
-      sliceVel = pMean(:,i)
-      call linear_interp(sliceVel(1:ng(3)),zcg,ng(3),0.99*uinf(i),delta99(i),1)
+    
+    ! Calculate boundary layer thickness for each streamwise location
+    do i = 1, ng(1)
+        ! Extract velocity profile at current x-location
+        sliceVel = pMean(:,i)
+        
+        ! Target velocity for δ99 (99% of free-stream)
+        velTemp(1) = 0.99_rp * uinf(i)
+        
+        ! Interpolate to find δ99
+        call linear_interp(sliceVel(1:ng(3)), zcg, ng(3), velTemp, thickTemp, 1)
+        
+        delta99(i) = thickTemp(1)
     end do
-  end subroutine displ_thickness
+    
+    ! Deallocate arrays
+    deallocate(pMean, uinf, sliceVel, velTemp, thickTemp)
+    
+    end subroutine displ_thickness
 
   subroutine get_wss(p,n,ng,lo,hi,dl,l,wss,uTau,zcg,visc)
     real(rp), dimension(0:,0:,0:), intent(in):: p
@@ -156,17 +183,17 @@ contains
     end do
   end subroutine get_wss
 
-  subroutine bl_stats(fname, n, ng, lo, hi, dl, l, u, v, w, zcg, visc)
+  subroutine bl_stats(fname, n, ng, lo, hi, dl, l, u, v, w, zcg, visc,myid)
     character(len=*), intent(in) :: fname
-    integer, intent(in) :: n(3), ng(3), lo(3), hi(3)
+    integer, intent(in) :: n(3), ng(3), lo(3), hi(3), myid
     real(rp), intent(in) :: visc, dl(:), l(3)
     real(rp), intent(in) :: u(0:,0:,0:), v(0:,0:,0:), w(0:,0:,0:), zcg(:)
-    
+    integer:: iunit, rank, node
     ! Local variables
     real(rp), allocatable :: delta99(:), wss(:), uTau(:), lscale(:), delta99plus(:)
-    real(rp), allocatable :: yplus(:,:), uPlus(:,:), uMean(:,:), uInf(:)
+    real(rp), allocatable :: yPlus(:,:), uPlus(:,:), uMean(:,:), uInf(:)
     real(rp), allocatable :: yPlusTemp(:), uPlusTemp(:), integrand(:)
-    real(rp), allocatable :: reDelta(:), reTheta(:)
+    real(rp), allocatable :: reDelta(:), reTheta(:),velTemp(:), thickTemp(:)
     integer :: i, npoints, idLimit, j
     real(rp) :: delta99u
 
@@ -177,7 +204,10 @@ contains
     allocate(uPlus(ng(3),ng(1)), uMean(0:ng(3)+1,0:ng(1)+1), uInf(ng(1)))
     allocate(yPlusTemp(ng(3)+1), uPlusTemp(ng(3)+1))
     allocate(reDelta(ng(1)), reTheta(ng(1)))
+    allocate(velTemp(1), thickTemp(1))
 
+    call MPI_COMM_RANK(MPI_COMM_WORLD, rank, ierr)
+    call MPI_COMM_SIZE(MPI_COMM_WORLD, node, ierr)
     ! Fix 3: Initialize arrays
     yPlusTemp = 0.0_rp
     uPlusTemp = 0.0_rp
@@ -189,13 +219,6 @@ contains
     call Meanflow2D(ng, n, lo, hi, dl, l, u, uMean, 2, .false.)
     call displ_thickness(u, n, ng, lo, hi, dl, l, delta99, zcg)
     call get_wss(u, n, ng, lo, hi, dl, l, wss, uTau, zcg, visc)
-
-    ! Fix 4: Add check for zero uTau
-    if (any(uTau <= 0.0_rp)) then
-        print *, "Error: Zero or negative friction velocity detected"
-        return
-    end if
-
     lscale = visc/uTau
     delta99plus = delta99/lscale
     uInf = uMean(ng(3),1:ng(1))
@@ -205,17 +228,18 @@ contains
         uPlusTemp = 0.0_rp
         yPlusTemp = 0.0_rp
         
-        yPlus(:,i) = zcg/lscale(i)
+        yPlus(:,i) = zcg(1:n(3))/lscale(i)
         uPlus(:,i) = uMean(1:ng(3),i)/uTau(i)  ! Fix 6: Correct array indexing
         
         yPlusTemp(1:ng(3)) = yPlus(:,i)
         uPlusTemp(1:ng(3)) = uPlus(:,i)
         
-
-        call linear_interp(yPlusTemp, uPlusTemp, ng(3)+1, delta99(i), delta99u, 1)
+        thickTemp(1) = delta99(i)
+        
+        call linear_interp(yPlusTemp, uPlusTemp, ng(3)+1, thickTemp, velTemp, 1)
         
         yPlusTemp(ng(3)+1) = delta99(i)
-        uPlusTemp(ng(3)+1) = delta99u
+        uPlusTemp(ng(3)+1) = velTemp(1)
 
         ! Fix 8: Add error checking for sorting
         call sort_couple(yPlusTemp, uPlusTemp)
@@ -227,7 +251,6 @@ contains
                 idLimit = idLimit + 1
             end if
         end do
-
         allocate(integrand(idLimit))
 
         ! Calculate displacement and momentum thickness
@@ -237,14 +260,20 @@ contains
         integrand = (1.0_rp - (uPlusTemp(1:idLimit)/(uInf(i)/uTau(i)))) * &
                    (uPlusTemp(1:idLimit)/(uInf(i)/uTau(i)))
         call trapezoidal_integral(yPlusTemp(1:idLimit), integrand, idLimit, reTheta(i))
+        deallocate(integrand)
     end do
-
+    if(myid == 0) then
+        open(newunit=iunit,file=fname)
+          do i=1,ng(1)
+            write(iunit,fmt_rp) uTau
+          end do
+        close(iunit)
+    end if
     ! Fix 11: Deallocate arrays before exiting
-    deallocate(integrand)
-    deallocate(delta99, wss, uTau, lscale, delta99plus)
-    deallocate(yPlus, uPlus, uMean, uInf)
-    deallocate(yPlusTemp, uPlusTemp)
-    deallocate(reDelta, reTheta)
+    !deallocate(delta99, wss, uTau, lscale, delta99plus)
+    !deallocate(yPlus, uPlus, uMean, uInf)
+    !deallocate(yPlusTemp, uPlusTemp)
+    !deallocate(reDelta, reTheta)
 
 end subroutine bl_stats
 end module mod_stats

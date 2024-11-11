@@ -63,7 +63,7 @@ program cans
                                  datadir,   &
                                  read_input
   use mod_sanity         , only: test_sanity_input,test_sanity_solver
-  use mod_stats           , only: mean2D
+  use mod_stats           , only: mean2D,bl_stats
   use mod_laminarBL       , only: initBL
 
 #if !defined(_OPENACC)
@@ -81,7 +81,7 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean, advection
+  use mod_utils          , only: bulk_mean, advection,check_init_profile
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
@@ -354,8 +354,16 @@ program cans
   !
   if(myid == 0) print*, '*** Calculation loop starts now ***'
   utarget = 0.0_rp
-  call initBL(1000,40.0_rp,0.05_rp,utarget,zc(1:n(3)),visc,1.0_rp)
-  
+  call initBL(1000,15.0_rp,0.02_rp,utarget,zc(1:n(3)),visc,1.0_rp)
+  filename = trim(datadir)//'bl_init_u.out'
+  call check_init_profile(utarget,n,zc,filename,1)
+
+    filename = trim(datadir)//'bl_init_v.out'
+  call check_init_profile(utarget,n,zc,filename,2)
+
+    filename = trim(datadir)//'bl_init_w.out'
+  call check_init_profile(utarget,n,zc,filename,3)
+
   uinf = utarget(1,:,:)
   vinf = utarget(2,:,:)
   winf = utarget(2,:,:)
@@ -556,6 +564,8 @@ program cans
     if(mod(istep,iout1d) == 0) then
       !$acc wait
       !$acc update self(u,v,w,p)
+      filename = trim(datadir)//'wss'//fldnum//'.out'
+      call bl_stats(filename, n, ng, lo, hi, dl, l, u, v, w, zc, visc,myid)
       include 'out1d.h90'
     end if
     if(mod(istep,iout2d) == 0) then
