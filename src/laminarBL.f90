@@ -140,6 +140,6 @@ contains
         ! y(3) = f''
         dydt(1) = y(2)        ! df/dη = f'
         dydt(2) = y(3)        ! df'/dη = f''
-        dydt(3) = -y(1)*y(3)  ! df''/dη = -f*f''
+        dydt(3) = -(y(1)*y(3))*0.5  ! df''/dη = -f*f''
     end subroutine derivatives
 end module mod_laminarBL
