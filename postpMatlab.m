@@ -16,13 +16,9 @@ for i=1:length(filesData)
 end
 
 
-n = linspace(1,100,100);
-hold on 
-for i=1:100
-    t = i*ones(100);
-    plot3(n,t,wss(1:100,i))
-end 
-hold off
+n = linspace(1,128,128);
+figure()
+plot(n,redelta(:,100)./retheta(:,100))
 %%
 filesData = dir(path+"*uPlus*.out");
 for i=1:length(filesData)
@@ -55,4 +51,5 @@ for i=1:length(filesData)
     yPlus(:,:,i) = table2array(data);
     % data =flip(data,1)
 end
+figure()
 semilogx(yPlus(:,100,80),uPlus(:,100,80))
