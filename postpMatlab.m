@@ -37,9 +37,7 @@ for i=1:length(filesData)
     end
 
     uPlus(:,:,i) = table2array(data);
-    % data =flip(data,1)
-    contourf(ddata)
-    colorbar
+
 end
 
 filesData = dir(path+"*yPlus*.out");
@@ -56,6 +54,5 @@ for i=1:length(filesData)
 
     yPlus(:,:,i) = table2array(data);
     % data =flip(data,1)
-    contourf(ddata)
-    colorbar
 end
+semilogx(yPlus(:,100,80),uPlus(:,100,80))
