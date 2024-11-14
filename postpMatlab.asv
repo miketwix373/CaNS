@@ -2,14 +2,43 @@ clc; clear;
 root = pwd;
 path = root + "/run/data/";
 
-filenames = ["bl_init_u.out" "bl_init_v.out" "bl_init_w.out"];
 
-for i=1:3
-    data = readtable(path+filenames(i),"FileType","text");
-    temp = table2array(data);
-    profile(:,i)= temp(:,2);
-    z 
+%% Store de 1d BL data
+filesData = dir(path+"*1d_bl*.out");
+
+for i=1:length(filesData)
+    filename = filesData(i).name;
+    data = readtable(path+filename,"FileType","text");
+    datTemp = table2array(data);
+    wss(:,i) = datTemp(:,1);
+    redelta(:,i) = datTemp(:,2);
+    retheta(:,i) = datTemp(:,3);
 end
 
-figure()
-plot()
+
+n = linspace(1,100,100);
+hold on 
+for i=1:100
+    t = i*ones(100);
+    plot3(n,t,wss(1:100,i))
+end 
+hold off
+%%
+filesData = dir(path+"*uPlus*.out");
+for i=1:length(filesData)
+    filename = filesData(i).name;
+    data =(readtable(path+filename,"FileType","text"));
+
+    cellMask = varfun(@iscell, data, 'OutputFormat', 'uniform');
+    for col = find(cellMask)
+        stringIdx = cellfun(@ischar, data{:,col}) | cellfun(@isstring, data{:,col});
+        numericCells = cellfun(@str2double, data{:,col}, 'UniformOutput', false);
+        data.(data.Properties.VariableNames{col}) = cell2mat(numericCells);
+    end
+
+    uPlus = table2array(data);
+    % data =flip(data,1)
+    contourf(ddata)
+    colorbar
+end
+

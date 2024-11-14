@@ -183,8 +183,9 @@ subroutine displ_thickness(p, n, ng, lo, hi, dl, l, delta99, zcg)
     end do
   end subroutine get_wss
 
-  subroutine bl_stats(fname, n, ng, lo, hi, dl, l, u, v, w, zcg, visc,myid)
-    character(len=*), intent(in) :: fname
+  subroutine bl_stats(fname1d,datadir, n, ng, lo, hi, dl, l, u, v, w, zcg, visc,myid,fldnum)
+    character(len=*) :: fname1d,datadir,fldnum
+    character(len=100) :: fname2d
     integer, intent(in) :: n(3), ng(3), lo(3), hi(3), myid
     real(rp), intent(in) :: visc, dl(:), l(3)
     real(rp), intent(in) :: u(0:,0:,0:), v(0:,0:,0:), w(0:,0:,0:), zcg(:)
@@ -263,9 +264,22 @@ subroutine displ_thickness(p, n, ng, lo, hi, dl, l, delta99, zcg)
         deallocate(integrand)
     end do
     if(myid == 0) then
-        open(newunit=iunit,file=fname)
+        open(newunit=iunit,file=fname1d)
           do i=1,ng(1)
-            write(iunit,fmt_rp) uTau
+            write(iunit,fmt_rp) wss(i), reDelta(i), reTheta(i)
+          end do
+        close(iunit)
+
+        fname2d = trim(datadir)//'yPlus'//fldnum//'.out'
+        open(newunit=iunit,file=fname2d)
+          do i=1,ng(3)
+            write(iunit,fmt_rp) yPlus(i,:)
+          end do
+        close(iunit)
+        fname2d = trim(datadir)//'uPlus'//fldnum//'.out'
+        open(newunit=iunit,file=fname2d)
+          do i=1,ng(3)
+            write(iunit,fmt_rp) uPlus(i,:)
           end do
         close(iunit)
     end if

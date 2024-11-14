@@ -11,11 +11,48 @@ module mod_utils
   implicit none
   private 
   public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral,&
-   identify_fringe,fringeForce,linear_interp,MeanFlow2D,sort_couple,check_init_profile
+   identify_fringe,fringeForce,linear_interp,MeanFlow2D,sort_couple,&
+   check_init_profile, map_trip
 
 
   !@acc public device_memory_footprint
 contains
+  subroutine map_trip(lo,n,dl,zcg,trip_mask,center,diam)
+    integer, intent(in):: lo(3),n(3),diam
+    real(rp), intent(in):: dl(3),center(2),zcg(:)
+    integer,intent(inout):: trip_mask(0:,0:,0:)
+
+    integer:: i,j,idx,idz
+    real(rp):: xposLow,xposHi,zposLow,zposHi
+
+    do i=0,n(1)
+      do j=0,n(3)
+        xposLow = (dl(1)*((lo(1)-1)+i))
+        xposHi  = (dl(1)*(lo(1)+i))
+        zposLow = zcg(j)
+        zposHi  = zcg(j)+1
+        if((xposLow<center(1)).and.(xposHi>center(1))) then
+          if ((zposLow<center(2)).and.(zposHi>center(2))) then
+            idx = i + lo(1)-1
+            idz = j
+          end if  
+        end if
+      end do
+    end do
+    
+    trip_mask = 1
+
+    do i=0,n(1)+1
+      do j=0,n(3)+1
+        if ((((lo(1)-1)+i >= idx-(diam-1))).and.(((lo(1)-1)+i <= idx+(diam-1)))) then
+          if ((j>=idz-diam-1).and.(j<=idz+(diam-1)))  then
+            trip_mask(i,:,j) = 0
+          end if
+        end if
+      end do
+    end do
+
+  end subroutine map_trip
   subroutine check_init_profile (profile,n,zcg,fname,dir)
     character(len=*), intent(in) :: fname
     real(rp),intent(in)::profile(:,:,:), zcg(:)

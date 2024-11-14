@@ -81,13 +81,14 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean, advection,check_init_profile
+  use mod_utils          , only: bulk_mean, advection,check_init_profile,map_trip
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
   implicit none
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
   real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast,utarget
+  integer, allocatable, dimension(:,:,:):: trip_mask
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
   real(rp):: thick0, etaMax
@@ -135,7 +136,7 @@ program cans
   integer  :: savecounter
   character(len=7  ) :: fldnum
   character(len=4  ) :: chkptnum
-  character(len=100) :: filename
+  character(len=100) :: filename,filename2
   integer :: k,kk
   logical :: is_done,kill
   !
@@ -170,7 +171,8 @@ program cans
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            p( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            pp(0:n(1)+1,0:n(2)+1,0:n(3)+1))
-    allocate(utarget(3,0:n(2)+1,0:n(3)+1))
+  allocate(trip_mask( 0:n(1)+1,0:n(2)+1,0:n(3)+1))           
+  allocate(utarget(3,0:n(2)+1,0:n(3)+1))
   allocate(lambdaxyp(n_z(1),n_z(2)))
   allocate(ap(n_z(3)),bp(n_z(3)),cp(n_z(3)))
   allocate(dzc( 0:n(3)+1), &
@@ -334,6 +336,10 @@ program cans
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
   call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.)
+  call map_trip(lo,n,dl,zc,trip_mask,(/l(1)*0.1,l(3)*0.05/),1)
+  u = u * trip_mask
+  v = v * trip_mask
+  w = w * trip_mask
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -485,6 +491,9 @@ program cans
 #endif
       dpdl(:) = dpdl(:) + f(:)
       call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf)
+      u = u * trip_mask
+      v = v * trip_mask
+      w = w * trip_mask
 !      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
@@ -492,6 +501,9 @@ program cans
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
       call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf)
+      u = u * trip_mask
+      v = v * trip_mask
+      w = w * trip_mask
 !      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.,.false.)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
@@ -567,8 +579,9 @@ program cans
     if(mod(istep,iout1d) == 0) then
       !$acc wait
       !$acc update self(u,v,w,p)
-      filename = trim(datadir)//'wss'//fldnum//'.out'
-      call bl_stats(filename, n, ng, lo, hi, dl, l, u, v, w, zc, visc,myid)
+      filename = trim(datadir)//'1d_bl'//fldnum//'.out'
+      filename2 = datadir
+      call bl_stats(filename,filename2,n, ng, lo, hi, dl, l, u, v, w, zc, visc,myid,fldnum)
       include 'out1d.h90'
     end if
     if(mod(istep,iout2d) == 0) then

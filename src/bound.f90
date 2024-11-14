@@ -91,6 +91,7 @@ module mod_bound
                          call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc(1,3,2),dzc(n(3)),v)
       if(impose_norm_bc) call set_bc(cbc(1,3,3),1,3,nh,.false.,bc(1,3,3),dzf(n(3)),w)
     end if
+    
   end subroutine bounduvw
   !
   subroutine boundp(cbc,n,bc,nb,is_bound,dl,dzc,p)
