@@ -336,10 +336,10 @@ program cans
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
   call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.)
-  call map_trip(lo,n,dl,zc,trip_mask,(/l(1)*0.1,l(3)*0.05/),1)
-  u = u * trip_mask
-  v = v * trip_mask
-  w = w * trip_mask
+  !call map_trip(lo,n,dl,zc,trip_mask,(/l(1)*0.1,l(3)*0.05/),1)
+  !u = u * trip_mask
+  !v = v * trip_mask
+  !w = w * trip_mask
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -491,9 +491,9 @@ program cans
 #endif
       dpdl(:) = dpdl(:) + f(:)
       call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf)
-      u = u * trip_mask
-      v = v * trip_mask
-      w = w * trip_mask
+      !u = u * trip_mask
+      !v = v * trip_mask
+      !w = w * trip_mask
 !      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
@@ -501,9 +501,9 @@ program cans
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
       call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf)
-      u = u * trip_mask
-      v = v * trip_mask
-      w = w * trip_mask
+      !u = u * trip_mask
+      !v = v * trip_mask
+      !w = w * trip_mask
 !      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.,.false.)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
