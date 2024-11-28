@@ -52,4 +52,4 @@ for i=1:length(filesData)
     % data =flip(data,1)
 end
 figure()
-semilogx(yPlus(:,100,80),uPlus(:,100,80))
+semilogx(yPlus(:,100,3),uPlus(:,100,3))

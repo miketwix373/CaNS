@@ -45,7 +45,7 @@ program cans
   use mod_initsolver     , only: initsolver
   use mod_load           , only: load_all
   use mod_mom            , only: bulk_forcing
-  use mod_rk             , only: rk
+  use mod_rk             , only: rk, rk_pt
   use mod_output         , only: out0d,gen_alias,out1d,out1d_chan,out2d,out3d,write_log_output,write_visu_2d,write_visu_3d
   use mod_param          , only: ng,l,dl,dli, &
                                  gtype,gr, &
@@ -65,7 +65,7 @@ program cans
   use mod_sanity         , only: test_sanity_input,test_sanity_solver
   use mod_stats           , only: mean2D,bl_stats
   use mod_laminarBL       , only: initBL
-
+  use mod_perturbation    , only: pert_force
 #if !defined(_OPENACC)
   use mod_solver         , only: solver
 #if defined(_IMPDIFF_1D)
@@ -87,7 +87,7 @@ program cans
   use omp_lib
   implicit none
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
-  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast,utarget
+  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast,utarget,pf
   integer, allocatable, dimension(:,:,:):: trip_mask
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
@@ -97,9 +97,11 @@ program cans
 #else
   integer    , dimension(2,2) :: arrplanp
 #endif
+  real(rp), allocatable, dimension(:) :: h0,h1
   real(rp), allocatable, dimension(:,:) :: lambdaxyp
   real(rp), allocatable, dimension(:) :: ap,bp,cp
   real(rp) :: normfftp
+  integer :: cycles = 0
   real(rp), allocatable, dimension(:,:):: uMean,u_adv,v_adv,w_adv,uinf,vinf,winf
   type rhs_bound
     real(rp), allocatable, dimension(:,:,:) :: x
@@ -162,7 +164,9 @@ program cans
           w_adv(0:n(2)+1,0:n(3)+1) )
     allocate(uinf(0:n(2)+1,0:n(3)+1), &
           vinf(0:n(2)+1,0:n(3)+1), &
-          winf(0:n(2)+1,0:n(3)+1))        
+          winf(0:n(2)+1,0:n(3)+1))      
+  allocate(pf(0:n(1)+1,0:n(2)+1,0:n(3)+1))  
+  allocate(h0(0:n(2)+1),h1(0:n(2)+1))   
   allocate(upast( 2,0:n(2)+1,0:n(3)+1), &
            vpast( 2,0:n(2)+1,0:n(3)+1), &
            wpast( 2,0:n(2)+1,0:n(3)+1))  
@@ -377,6 +381,8 @@ program cans
   vinf = utarget(2,:,:)
   winf = utarget(2,:,:)
 
+  call pert_force(0.0_rp,pf,n,dl,zc_g,lo,l,cycles,.true.,h0,h1,thick0,1.0_rp)
+
   is_done = .false.
   do while(.not.is_done)
 #if defined(_TIMING)
@@ -385,6 +391,7 @@ program cans
 #endif
     istep = istep + 1
     time = time + dt
+    
     if(myid == 0) print*, 'Time step #', istep, 'Time = ', time
     tauxo(:) = 0.
     tauyo(:) = 0.
@@ -395,7 +402,7 @@ program cans
     vpast = v(n(1)-1:n(1),:,:)
     wpast = w(n(1)-1:n(1),:,:)
 
-    do irk=1,1
+    do irk=1,3
     
       dtrk = sum(rkcoeff(:,irk))*dt
       call advection(n,dtrk,dl(1),upast,uMean,u_adv)
@@ -403,11 +410,12 @@ program cans
       call advection(n,dtrk,dl(1),wpast,uMean,w_adv)
 
       dtrki = dtrk**(-1)
+      call pert_force(time,pf,n,dl,zc_g,lo,l,cycles,.false.,h0,h1,thick0,1.0_rp)
 
       !call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
       !        is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.8*ng(1)),lo,ng)     
-      call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-              is_forced,velf,bforce,u,v,w,f,.false.)       
+      call rk_pt(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+              is_forced,velf,bforce,u,v,w,f,pf)       
       call bulk_forcing(n,is_forced,f,u,v,w)
       
 

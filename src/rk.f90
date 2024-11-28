@@ -21,9 +21,363 @@ module mod_rk
   use mod_types
   implicit none
   private
-  public rk
+  public rk,rk_pt
   contains
-  subroutine rk(rkpar,n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+    subroutine rk_pt(rkpar,n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+                is_forced,velf,bforce,u,v,w,f, pf)
+    !
+    ! low-storage 3rd-order Runge-Kutta scheme
+    ! for time integration of the momentum equations.
+    !
+    implicit none
+    real(rp), intent(in), dimension(2) :: rkpar
+    integer , intent(in), dimension(3) :: n
+    real(rp), intent(in) :: visc,dt
+    real(rp), intent(in   ), dimension(3) :: dli
+    real(rp), intent(in   ), dimension(0:) :: dzci,dzfi
+    real(rp), intent(in   ), dimension(0:) :: grid_vol_ratio_c,grid_vol_ratio_f
+    real(rp), intent(in   ), dimension(0:,0:,0:) :: p
+    logical , intent(in   ), dimension(3)        :: is_forced
+    real(rp), intent(in   ), dimension(3)        :: velf,bforce
+    real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w,pf
+    real(rp), intent(out), dimension(3) :: f
+    real(rp), target     , allocatable, dimension(:,:,:), save :: dudtrk_t ,dvdtrk_t ,dwdtrk_t , &
+                                                                  dudtrko_t,dvdtrko_t,dwdtrko_t
+    real(rp), pointer    , contiguous , dimension(:,:,:), save :: dudtrk   ,dvdtrk   ,dwdtrk   , &
+                                                                  dudtrko  ,dvdtrko  ,dwdtrko
+    real(rp),              allocatable, dimension(:,:,:), save :: dudtrkd  ,dvdtrkd  ,dwdtrkd
+    logical, save :: is_first = .true.
+    real(rp) :: factor1,factor2,factor12
+    integer :: i,j,k
+
+    !
+    factor1 = rkpar(1)*dt
+    factor2 = rkpar(2)*dt
+    factor12 = factor1 + factor2
+    !
+    ! initialization
+    !
+    if(is_first) then ! leverage save attribute to allocate these arrays on the device only once
+      is_first = .false.
+      allocate(dudtrk_t( n(1),n(2),n(3)),dvdtrk_t( n(1),n(2),n(3)),dwdtrk_t( n(1),n(2),n(3)))
+      allocate(dudtrko_t(n(1),n(2),n(3)),dvdtrko_t(n(1),n(2),n(3)),dwdtrko_t(n(1),n(2),n(3)))
+      !$acc enter data create(dudtrk_t ,dvdtrk_t ,dwdtrk_t ) async(1)
+      !$acc enter data create(dudtrko_t,dvdtrko_t,dwdtrko_t) async(1)
+      !$acc kernels default(present) async(1) ! not really necessary
+      dudtrko_t(:,:,:) = 0._rp
+      dvdtrko_t(:,:,:) = 0._rp
+      dwdtrko_t(:,:,:) = 0._rp
+      !$acc end kernels
+#if defined(_IMPDIFF)
+      allocate(dudtrkd(n(1),n(2),n(3)),dvdtrkd(n(1),n(2),n(3)),dwdtrkd(n(1),n(2),n(3)))
+      !$acc enter data create(dudtrkd,dvdtrkd,dwdtrkd) async(1)
+#endif
+      dudtrk  => dudtrk_t
+      dvdtrk  => dvdtrk_t
+      dwdtrk  => dwdtrk_t
+      dudtrko => dudtrko_t
+      dvdtrko => dvdtrko_t
+      dwdtrko => dwdtrko_t
+    end if
+    !
+#if defined(_FAST_MOM_KERNELS)
+    call mom_xyz_ad(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,u,v,w,dudtrk,dvdtrk,dwdtrk,dudtrkd,dvdtrkd,dwdtrkd)
+#else
+    !$acc kernels default(present) async(1)
+    !$OMP PARALLEL WORKSHARE
+    dudtrk(:,:,:) = 0._rp
+    dvdtrk(:,:,:) = 0._rp
+    dwdtrk(:,:,:) = 0._rp
+    !$OMP END PARALLEL WORKSHARE
+    !$acc end kernels
+#if !defined(_IMPDIFF)
+    call momx_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,u,dudtrk)
+    call momy_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,v,dvdtrk)
+    call momz_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,w,dwdtrk)
+#else
+    !$acc kernels default(present) async(1)
+    !$OMP PARALLEL WORKSHARE
+    dudtrkd(:,:,:) = 0._rp
+    dvdtrkd(:,:,:) = 0._rp
+    dwdtrkd(:,:,:) = 0._rp
+    !$OMP END PARALLEL WORKSHARE
+    !$acc end kernels
+#if !defined(_IMPDIFF_1D)
+    call momx_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,u,dudtrkd)
+    call momy_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,v,dvdtrkd)
+    call momz_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,w,dwdtrkd)
+#else
+    call momx_d_xy(n(1),n(2),n(3),dli(1),dli(2),visc,u,dudtrk )
+    call momy_d_xy(n(1),n(2),n(3),dli(1),dli(2),visc,v,dvdtrk )
+    call momz_d_xy(n(1),n(2),n(3),dli(1),dli(2),visc,w,dwdtrk )
+    call momx_d_z( n(1),n(2),n(3),dzci  ,dzfi  ,visc,u,dudtrkd)
+    call momy_d_z( n(1),n(2),n(3),dzci  ,dzfi  ,visc,v,dvdtrkd)
+    call momz_d_z( n(1),n(2),n(3),dzci  ,dzfi  ,visc,w,dwdtrkd)
+#endif
+    call momx_a(n(1),n(2),n(3),dli(1),dli(2),dzfi,u,v,w,dudtrk)
+    call momy_a(n(1),n(2),n(3),dli(1),dli(2),dzfi,u,v,w,dvdtrk)
+    call momz_a(n(1),n(2),n(3),dli(1),dli(2),dzci,u,v,w,dwdtrk)
+#endif
+#endif
+    !
+    !$acc parallel loop collapse(3) default(present) async(1)
+    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared
+
+    do k=1,n(3)
+      do j=1,n(2)
+        do i=1,n(1)
+#if !defined(_FAST_MOM_KERNELS)
+          u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k)
+          v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k)
+          w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k)
+#else         
+          u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
+                                factor12*(bforce(1) - dli(1)*( p(i+1,j,k)-p(i,j,k)))
+          !
+          v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k) + &
+                                factor12*(bforce(2) - dli(2)*( p(i,j+1,k)-p(i,j,k)))
+          !
+          w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k) + &
+                                factor12*(pf(i,j,k) - dzci(k)*(p(i,j,k+1)-p(i,j,k)))                    
+#endif
+#if defined(_IMPDIFF)
+          u(i,j,k) = u(i,j,k) + factor12*dudtrkd(i,j,k)
+          v(i,j,k) = v(i,j,k) + factor12*dvdtrkd(i,j,k)
+          w(i,j,k) = w(i,j,k) + factor12*dwdtrkd(i,j,k)
+#endif
+        end do
+      end do
+    end do
+    !
+    ! swap d?dtrk <-> d?dtrko
+    !
+    call swap(dudtrk,dudtrko)
+    call swap(dvdtrk,dvdtrko)
+    call swap(dwdtrk,dwdtrko)
+#if !defined(_FAST_MOM_KERNELS)
+    !$acc parallel loop collapse(3) default(present) async(1)
+    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared)
+    do k=1,n(3)
+      do j=1,n(2)
+        do i=1,n(1)
+          u(i,j,k) = u(i,j,k) + factor12*(bforce(1) - dli(1)*( p(i+1,j,k)-p(i,j,k)))
+          v(i,j,k) = v(i,j,k) + factor12*(bforce(2) - dli(2)*( p(i,j+1,k)-p(i,j,k)))
+          w(i,j,k) = w(i,j,k) + factor12*(bforce(3) - dzci(k)*(p(i,j,k+1)-p(i,j,k)))
+        end do
+      end do
+    end do
+#endif
+    !
+    ! compute bulk velocity forcing
+    !
+    call cmpt_bulk_forcing(n,is_forced,velf,grid_vol_ratio_c,grid_vol_ratio_f,u,v,w,f)
+    !
+#if defined(_IMPDIFF)
+    !
+    ! compute rhs of Helmholtz equation
+    !
+    !$acc parallel loop collapse(3) default(present) async(1)
+    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared)
+    do k=1,n(3)
+      do j=1,n(2)
+        do i=1,n(1)
+          u(i,j,k) = u(i,j,k) - .5_rp*factor12*dudtrkd(i,j,k)
+          v(i,j,k) = v(i,j,k) - .5_rp*factor12*dvdtrkd(i,j,k)
+          w(i,j,k) = w(i,j,k) - .5_rp*factor12*dwdtrkd(i,j,k)
+        end do
+      end do
+    end do
+#endif
+  end subroutine rk_pt
+    subroutine rk(rkpar,n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+                is_forced,velf,bforce,u,v,w,f)
+    !
+    ! low-storage 3rd-order Runge-Kutta scheme
+    ! for time integration of the momentum equations.
+    !
+    implicit none
+    real(rp), intent(in), dimension(2) :: rkpar
+    integer , intent(in), dimension(3) :: n
+    real(rp), intent(in) :: visc,dt
+    real(rp), intent(in   ), dimension(3) :: dli
+    real(rp), intent(in   ), dimension(0:) :: dzci,dzfi
+    real(rp), intent(in   ), dimension(0:) :: grid_vol_ratio_c,grid_vol_ratio_f
+    real(rp), intent(in   ), dimension(0:,0:,0:) :: p
+    logical , intent(in   ), dimension(3)        :: is_forced
+    real(rp), intent(in   ), dimension(3)        :: velf,bforce
+    real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
+    real(rp), intent(out), dimension(3) :: f
+    real(rp), target     , allocatable, dimension(:,:,:), save :: dudtrk_t ,dvdtrk_t ,dwdtrk_t , &
+                                                                  dudtrko_t,dvdtrko_t,dwdtrko_t
+    real(rp), pointer    , contiguous , dimension(:,:,:), save :: dudtrk   ,dvdtrk   ,dwdtrk   , &
+                                                                  dudtrko  ,dvdtrko  ,dwdtrko
+    real(rp),              allocatable, dimension(:,:,:), save :: dudtrkd  ,dvdtrkd  ,dwdtrkd
+    logical, save :: is_first = .true.
+    real(rp) :: factor1,factor2,factor12
+    integer :: i,j,k
+
+    factor1 = rkpar(1)*dt
+    factor2 = rkpar(2)*dt
+    factor12 = factor1 + factor2
+    !
+    ! initialization
+    !
+    if(is_first) then ! leverage save attribute to allocate these arrays on the device only once
+      is_first = .false.
+      allocate(dudtrk_t( n(1),n(2),n(3)),dvdtrk_t( n(1),n(2),n(3)),dwdtrk_t( n(1),n(2),n(3)))
+      allocate(dudtrko_t(n(1),n(2),n(3)),dvdtrko_t(n(1),n(2),n(3)),dwdtrko_t(n(1),n(2),n(3)))
+      !$acc enter data create(dudtrk_t ,dvdtrk_t ,dwdtrk_t ) async(1)
+      !$acc enter data create(dudtrko_t,dvdtrko_t,dwdtrko_t) async(1)
+      !$acc kernels default(present) async(1) ! not really necessary
+      dudtrko_t(:,:,:) = 0._rp
+      dvdtrko_t(:,:,:) = 0._rp
+      dwdtrko_t(:,:,:) = 0._rp
+      !$acc end kernels
+#if defined(_IMPDIFF)
+      allocate(dudtrkd(n(1),n(2),n(3)),dvdtrkd(n(1),n(2),n(3)),dwdtrkd(n(1),n(2),n(3)))
+      !$acc enter data create(dudtrkd,dvdtrkd,dwdtrkd) async(1)
+#endif
+      dudtrk  => dudtrk_t
+      dvdtrk  => dvdtrk_t
+      dwdtrk  => dwdtrk_t
+      dudtrko => dudtrko_t
+      dvdtrko => dvdtrko_t
+      dwdtrko => dwdtrko_t
+    end if
+    !
+#if defined(_FAST_MOM_KERNELS)
+    call mom_xyz_ad(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,u,v,w,dudtrk,dvdtrk,dwdtrk,dudtrkd,dvdtrkd,dwdtrkd)
+#else
+    !$acc kernels default(present) async(1)
+    !$OMP PARALLEL WORKSHARE
+    dudtrk(:,:,:) = 0._rp
+    dvdtrk(:,:,:) = 0._rp
+    dwdtrk(:,:,:) = 0._rp
+    !$OMP END PARALLEL WORKSHARE
+    !$acc end kernels
+#if !defined(_IMPDIFF)
+    call momx_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,u,dudtrk)
+    call momy_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,v,dvdtrk)
+    call momz_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,w,dwdtrk)
+#else
+    !$acc kernels default(present) async(1)
+    !$OMP PARALLEL WORKSHARE
+    dudtrkd(:,:,:) = 0._rp
+    dvdtrkd(:,:,:) = 0._rp
+    dwdtrkd(:,:,:) = 0._rp
+    !$OMP END PARALLEL WORKSHARE
+    !$acc end kernels
+#if !defined(_IMPDIFF_1D)
+    call momx_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,u,dudtrkd)
+    call momy_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,v,dvdtrkd)
+    call momz_d(n(1),n(2),n(3),dli(1),dli(2),dzci,dzfi,visc,w,dwdtrkd)
+#else
+    call momx_d_xy(n(1),n(2),n(3),dli(1),dli(2),visc,u,dudtrk )
+    call momy_d_xy(n(1),n(2),n(3),dli(1),dli(2),visc,v,dvdtrk )
+    call momz_d_xy(n(1),n(2),n(3),dli(1),dli(2),visc,w,dwdtrk )
+    call momx_d_z( n(1),n(2),n(3),dzci  ,dzfi  ,visc,u,dudtrkd)
+    call momy_d_z( n(1),n(2),n(3),dzci  ,dzfi  ,visc,v,dvdtrkd)
+    call momz_d_z( n(1),n(2),n(3),dzci  ,dzfi  ,visc,w,dwdtrkd)
+#endif
+    call momx_a(n(1),n(2),n(3),dli(1),dli(2),dzfi,u,v,w,dudtrk)
+    call momy_a(n(1),n(2),n(3),dli(1),dli(2),dzfi,u,v,w,dvdtrk)
+    call momz_a(n(1),n(2),n(3),dli(1),dli(2),dzci,u,v,w,dwdtrk)
+#endif
+#endif
+    !
+    !$acc parallel loop collapse(3) default(present) async(1)
+    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared
+
+    do k=1,n(3)
+      do j=1,n(2)
+        do i=1,n(1)
+#if !defined(_FAST_MOM_KERNELS)
+          u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k)
+          v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k)
+          w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k)
+#else
+          u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
+                                factor12*(bforce(1) - dli(1)*( p(i+1,j,k)-p(i,j,k)))
+          !
+          v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k) + &
+                                factor12*(bforce(2) - dli(2)*( p(i,j+1,k)-p(i,j,k)))
+          !
+          w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k) + &
+                                factor12*(bforce(3) - dzci(k)*(p(i,j,k+1)-p(i,j,k)))
+#endif
+#if defined(_IMPDIFF)
+          u(i,j,k) = u(i,j,k) + factor12*dudtrkd(i,j,k)
+          v(i,j,k) = v(i,j,k) + factor12*dvdtrkd(i,j,k)
+          w(i,j,k) = w(i,j,k) + factor12*dwdtrkd(i,j,k)
+#endif
+        end do
+      end do
+    end do
+    !
+    ! swap d?dtrk <-> d?dtrko
+    !
+    call swap(dudtrk,dudtrko)
+    call swap(dvdtrk,dvdtrko)
+    call swap(dwdtrk,dwdtrko)
+!#if 0 /*pressure gradient term treated explicitly later */
+!    !$acc kernels
+!    !$OMP PARALLEL WORKSHARE
+!    dudtrk(:,:,:) = 0._rp
+!    dvdtrk(:,:,:) = 0._rp
+!    dwdtrk(:,:,:) = 0._rp
+!    !$OMP END PARALLEL WORKSHARE
+!    !$acc end kernels
+!    call momx_p(n(1),n(2),n(3),dli(1),bforce(1),p,dudtrk)
+!    call momy_p(n(1),n(2),n(3),dli(2),bforce(2),p,dvdtrk)
+!    call momz_p(n(1),n(2),n(3),dzci  ,bforce(3),p,dwdtrk)
+!    !$acc parallel loop collapse(3)
+!    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared)
+!    do k=1,n(3)
+!      do j=1,n(2)
+!        do i=1,n(1)
+!          u(i,j,k) = u(i,j,k) + factor12*dudtrk(i,j,k)
+!          v(i,j,k) = v(i,j,k) + factor12*dvdtrk(i,j,k)
+!          w(i,j,k) = w(i,j,k) + factor12*dwdtrk(i,j,k)
+!        end do
+!      end do
+!    end do
+!#endif
+#if !defined(_FAST_MOM_KERNELS)
+    !$acc parallel loop collapse(3) default(present) async(1)
+    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared)
+    do k=1,n(3)
+      do j=1,n(2)
+        do i=1,n(1)
+          u(i,j,k) = u(i,j,k) + factor12*(bforce(1) - dli(1)*( p(i+1,j,k)-p(i,j,k)))
+          v(i,j,k) = v(i,j,k) + factor12*(bforce(2) - dli(2)*( p(i,j+1,k)-p(i,j,k)))
+          w(i,j,k) = w(i,j,k) + factor12*(bforce(3) - dzci(k)*(p(i,j,k+1)-p(i,j,k)))
+        end do
+      end do
+    end do
+#endif
+    !
+    ! compute bulk velocity forcing
+    !
+    call cmpt_bulk_forcing(n,is_forced,velf,grid_vol_ratio_c,grid_vol_ratio_f,u,v,w,f)
+    !
+#if defined(_IMPDIFF)
+    !
+    ! compute rhs of Helmholtz equation
+    !
+    !$acc parallel loop collapse(3) default(present) async(1)
+    !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared)
+    do k=1,n(3)
+      do j=1,n(2)
+        do i=1,n(1)
+          u(i,j,k) = u(i,j,k) - .5_rp*factor12*dudtrkd(i,j,k)
+          v(i,j,k) = v(i,j,k) - .5_rp*factor12*dvdtrkd(i,j,k)
+          w(i,j,k) = w(i,j,k) - .5_rp*factor12*dwdtrkd(i,j,k)
+        end do
+      end do
+    end do
+#endif
+  end subroutine rk
+  subroutine rk_fringe(rkpar,n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
                 is_forced,velf,bforce,u,v,w,f, fringe_flag,utarget,loLimFringe,lo,ng)
     !
     ! low-storage 3rd-order Runge-Kutta scheme
@@ -38,7 +392,7 @@ module mod_rk
     real(rp), intent(in   ), dimension(0:) :: grid_vol_ratio_c,grid_vol_ratio_f
     real(rp), intent(in   ), dimension(0:,0:,0:) :: p
     logical , intent(in   ), dimension(3)        :: is_forced
-    logical , intent(in   )       :: fringe_flag
+    integer , intent(in   )       :: fringe_flag
     integer , intent(in   ),optional       :: loLimFringe
     integer, intent(in   ), optional,dimension(3):: lo, ng
     real(rp), intent(in), dimension(:,0:,0:),optional :: utarget
@@ -134,7 +488,7 @@ module mod_rk
     !
     !$acc parallel loop collapse(3) default(present) async(1)
     !$OMP PARALLEL DO   COLLAPSE(3) DEFAULT(shared
-    if (fringe_flag) then
+    if (fringe_flag==1) then
       call identify_fringe(isFringe,loLimFringe,lo)
       call fringeForce(bforceU,isFringe,dt,u,utarget,lo,loLimFringe,ng(1),1)
       call fringeForce(bforceV,isFringe,dt,v,utarget,lo,loLimFringe,ng(1),2)
@@ -150,7 +504,7 @@ module mod_rk
           v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k)
           w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k)
 #else
-  if (fringe_flag) then 
+  if (fringe_flag==1) then 
 
           u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
                                 factor12*(bforceU(i,j,k)*MERGE(1, 0, isFringe(i,j,k))  - dli(1)*( p(i+1,j,k)-p(i,j,k)))
@@ -160,6 +514,15 @@ module mod_rk
           !
           w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k) + &
                                 factor12*(bforceW(i,j,k)*MERGE(1, 0, isFringe(i,j,k)) - dzci(k)*(p(i,j,k+1)-p(i,j,k)))  
+  else if (fringe_flag==2) then          
+          u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
+                                factor12*(bforce(1) - dli(1)*( p(i+1,j,k)-p(i,j,k)))
+          !
+          v(i,j,k) = v(i,j,k) + factor1*dvdtrk(i,j,k) + factor2*dvdtrko(i,j,k) + &
+                                factor12*(bforce(2) - dli(2)*( p(i,j+1,k)-p(i,j,k)))
+          !
+          w(i,j,k) = w(i,j,k) + factor1*dwdtrk(i,j,k) + factor2*dwdtrko(i,j,k) + &
+                                factor12*(utarget(i,j,k) - dzci(k)*(p(i,j,k+1)-p(i,j,k)))                    
   else
           u(i,j,k) = u(i,j,k) + factor1*dudtrk(i,j,k) + factor2*dudtrko(i,j,k) + &
                                 factor12*(bforce(1) - dli(1)*( p(i+1,j,k)-p(i,j,k)))
@@ -242,7 +605,7 @@ module mod_rk
       end do
     end do
 #endif
-  end subroutine rk
+  end subroutine rk_fringe
   !
   subroutine rk_scal(rkpar,n,dli,l,dzci,dzfi,grid_vol_ratio_f,alpha,dt,is_bound,u,v,w, &
                      is_forced,scalf,ssource,fluxo,s,f)
