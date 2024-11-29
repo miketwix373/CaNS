@@ -5,7 +5,7 @@ module mod_stats
   use mod_utils, only: trapezoidal_integral, MeanFlow2D,sort_couple, linear_interp
   implicit none
   private
-  public mean2D, fluctuations, bl_stats
+  public mean2D, fluctuations, bl_stats, displ_thickness
   character(len=*), parameter :: fmt_dp = '(*(es24.16e3,1x))', &
                                  fmt_sp = '(*(es15.8e2,1x))'
 #if !defined(_SINGLE_PRECISION)
@@ -123,19 +123,18 @@ contains
 
   end subroutine fluctuations
 
-subroutine displ_thickness(p, n, ng, lo, hi, dl, l, delta99, zcg)
+subroutine displ_thickness(p, n, ng, lo, hi, dl, l, delta99, zcg,uinf)
     real(rp), dimension(0:,0:,0:), intent(in) :: p
     real(rp), intent(in) :: dl(3), l(3), zcg(:)
     integer, intent(in) :: n(3), ng(3), lo(3), hi(3)
-    real(rp), intent(out) :: delta99(:)
+    real(rp), intent(out) :: delta99(:),uinf(:)
     
     ! Local variables
-    real(rp), allocatable :: uinf(:), pMean(:,:), sliceVel(:), velTemp(:), thickTemp(:)
+    real(rp), allocatable :: pMean(:,:), sliceVel(:), velTemp(:), thickTemp(:)
     integer :: i
     
     ! Allocate arrays
     allocate(pMean(0:ng(3)+1, 0:ng(1)+1))
-    allocate(uinf(0:ng(1)+1))
     allocate(sliceVel(0:ng(3)+1))
     allocate(velTemp(1), thickTemp(1))
     
@@ -143,7 +142,7 @@ subroutine displ_thickness(p, n, ng, lo, hi, dl, l, delta99, zcg)
     call MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean, 2, .false.)
     
     ! Get free-stream velocity
-    uinf = pMean(ng(3),:)
+    uinf = pMean(ng(3),1:n(1))
     
     ! Calculate boundary layer thickness for each streamwise location
     do i = 1, ng(1)
@@ -160,7 +159,7 @@ subroutine displ_thickness(p, n, ng, lo, hi, dl, l, delta99, zcg)
     end do
     
     ! Deallocate arrays
-    deallocate(pMean, uinf, sliceVel, velTemp, thickTemp)
+    deallocate(pMean, sliceVel, velTemp, thickTemp)
     
     end subroutine displ_thickness
 
@@ -218,11 +217,10 @@ subroutine displ_thickness(p, n, ng, lo, hi, dl, l, delta99, zcg)
 
     ! Calculate mean flow and boundary layer parameters
     call Meanflow2D(ng, n, lo, hi, dl, l, u, uMean, 2, .false.)
-    call displ_thickness(u, n, ng, lo, hi, dl, l, delta99, zcg)
+    call displ_thickness(u, n, ng, lo, hi, dl, l, delta99, zcg,uInf)
     call get_wss(u, n, ng, lo, hi, dl, l, wss, uTau, zcg, visc)
     lscale = visc/uTau
     delta99plus = delta99/lscale
-    uInf = uMean(ng(3),1:ng(1))
 
     do i = 1, ng(1)
         ! Fix 5: Clear temporary arrays for each iteration

@@ -56,9 +56,9 @@ contains
 
         pf = 0.0
 
-        do i=0,n(1)+1
-            do j=0,n(2)+1
-                do k=0,n(3)+1
+        do i=1,n(1)
+            do j=1,n(2)
+                do k=1,n(3)
                     x = (lo(1)-1+i)*dl(1)
                     z = zcg(k)
                     pf(i,j,k) = exp(-(((x-x0)/lx)**2+(z/lz)**2))*g(j)

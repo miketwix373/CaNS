@@ -63,7 +63,7 @@ program cans
                                  datadir,   &
                                  read_input
   use mod_sanity         , only: test_sanity_input,test_sanity_solver
-  use mod_stats           , only: mean2D,bl_stats
+  use mod_stats           , only: mean2D,bl_stats, displ_thickness
   use mod_laminarBL       , only: initBL
   use mod_perturbation    , only: pert_force
 #if !defined(_OPENACC)
@@ -81,13 +81,15 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean, advection,check_init_profile,map_trip
+  use mod_utils          , only: bulk_mean, advection,check_init_profile,map_trip,pg_blowing
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
   implicit none
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
   real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast,utarget,pf
+  real(rp), allocatable, dimension(:):: d99,uInfx
+  real(rp), allocatable, dimension(:,:) :: wpast_top, blowBC
   integer, allocatable, dimension(:,:,:):: trip_mask
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
@@ -109,7 +111,7 @@ program cans
     real(rp), allocatable, dimension(:,:,:) :: z
   end type rhs_bound
   type(rhs_bound) :: rhsbp
-  real(rp) :: alpha
+  real(rp) :: alpha,beta
 #if defined(_IMPDIFF)
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanu,arrplanv,arrplanw
@@ -158,6 +160,8 @@ program cans
   !
   ! allocate variables
   !
+  allocate(d99(n(1)),uInfx(n(1)))
+  allocate(wpast_top(0:n(1)+1,0:n(2)+1),blowBC(0:n(1)+1,0:n(2)+1))
   allocate(uMean(0:n(2)+1,0:n(3)+1), &
           u_adv(0:n(2)+1,0:n(3)+1), &
           v_adv(0:n(2)+1,0:n(3)+1), &
@@ -339,7 +343,7 @@ program cans
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
-  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.)
+  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.,.false.)
   !call map_trip(lo,n,dl,zc,trip_mask,(/l(1)*0.1,l(3)*0.05/),1)
   !u = u * trip_mask
   !v = v * trip_mask
@@ -380,7 +384,11 @@ program cans
   uinf = utarget(1,:,:)
   vinf = utarget(2,:,:)
   winf = utarget(2,:,:)
-
+  do k=1,n(1)
+    u(k,:,:)= uinf
+    v(k,:,:)= vinf
+    w(k,:,:)= winf
+  end do
   call pert_force(0.0_rp,pf,n,dl,zc_g,lo,l,cycles,.true.,h0,h1,thick0,1.0_rp)
 
   is_done = .false.
@@ -393,6 +401,7 @@ program cans
     time = time + dt
     
     if(myid == 0) print*, 'Time step #', istep, 'Time = ', time
+
     tauxo(:) = 0.
     tauyo(:) = 0.
     tauzo(:) = 0.
@@ -401,6 +410,7 @@ program cans
     upast = u(n(1)-1:n(1),:,:)
     vpast = v(n(1)-1:n(1),:,:)
     wpast = w(n(1)-1:n(1),:,:)
+    wpast_top = w(:,:,n(3))
 
     do irk=1,3
     
@@ -408,12 +418,11 @@ program cans
       call advection(n,dtrk,dl(1),upast,uMean,u_adv)
       call advection(n,dtrk,dl(1),vpast,uMean,v_adv)
       call advection(n,dtrk,dl(1),wpast,uMean,w_adv)
-
+      
       dtrki = dtrk**(-1)
       call pert_force(time,pf,n,dl,zc_g,lo,l,cycles,.false.,h0,h1,thick0,1.0_rp)
-
       !call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-      !        is_forced,velf,bforce,u,v,w,f,.true.,utarget,floor(0.8*ng(1)),lo,ng)     
+      !        is_forced,velf,bforce,u,v,w,f)     
       call rk_pt(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
               is_forced,velf,bforce,u,v,w,f,pf)       
       call bulk_forcing(n,is_forced,f,u,v,w)
@@ -498,7 +507,10 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf)
+      beta = 0.1_rp
+      call pg_blowing(wpast_top,w(:,:,n(3)),d99,uInfx,beta,blowBC,n,zc_g)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,&
+          .true.,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf,blowBC)
       !u = u * trip_mask
       !v = v * trip_mask
       !w = w * trip_mask
@@ -507,8 +519,10 @@ program cans
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
+      call displ_thickness(u,n,ng,lo,hi,dl,l,d99,zc_g,uInfx)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,&
+          .true.,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf,blowBC)
       !u = u * trip_mask
       !v = v * trip_mask
       !w = w * trip_mask

@@ -12,7 +12,8 @@ module mod_bound
   private
   public boundp,bounduvw,updt_rhs_b
   contains
-  subroutine bounduvw(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,adv_flag,inf_flag,u_adv,v_adv,w_adv,uinf,vinf,winf)
+  subroutine bounduvw(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,adv_flag, &
+              inf_flag,blowing_flag,u_adv,v_adv,w_adv,uinf,vinf,winf,blowBC)
     !
     ! imposes velocity boundary conditions
     !
@@ -23,11 +24,11 @@ module mod_bound
     integer , intent(in), dimension(0:1,3  ) :: nb
     logical , intent(in), dimension(0:1,3  ) :: is_bound
     logical , intent(in)                     :: is_correc
-    logical , intent(in),optional            :: adv_flag,inf_flag
+    logical , intent(in),optional            :: adv_flag,inf_flag,blowing_flag
     real(rp), intent(in), dimension(3 ) :: dl
     real(rp), intent(in), dimension(0:) :: dzc,dzf
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
-    real(rp), intent(inout), optional, dimension(0:,0:) :: u_adv,v_adv,w_adv,uinf,vinf,winf
+    real(rp), intent(inout), optional, dimension(0:,0:) :: u_adv,v_adv,w_adv,uinf,vinf,winf,blowBC
     logical :: impose_norm_bc
     integer :: idir,nh
     !
@@ -87,9 +88,15 @@ module mod_bound
       if(impose_norm_bc) call set_bc(cbc(0,3,3),0,3,nh,.false.,bc(0,3,3),dzf(0)   ,w)
     end if
     if(is_bound(1,3)) then
+      if(blowing_flag) then
+                         call set_bc(cbc(1,3,1),1,3,nh,.true. ,bc(1,3,1),dzc(n(3)),u)
+                         call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc(1,3,2),dzc(n(3)),v)
+      if(impose_norm_bc) call set_bc_heterog(cbc(1,3,3),1,3,nh,.true. ,blowBC,dzc(n(3)),w)
+      else
                          call set_bc(cbc(1,3,1),1,3,nh,.true. ,bc(1,3,1),dzc(n(3)),u)
                          call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc(1,3,2),dzc(n(3)),v)
       if(impose_norm_bc) call set_bc(cbc(1,3,3),1,3,nh,.false.,bc(1,3,3),dzf(n(3)),w)
+      end if
     end if
     
   end subroutine bounduvw

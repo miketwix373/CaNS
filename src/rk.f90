@@ -24,7 +24,7 @@ module mod_rk
   public rk,rk_pt
   contains
     subroutine rk_pt(rkpar,n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-                is_forced,velf,bforce,u,v,w,f, pf)
+                is_forced,velf,bforce,u,v,w,f,pf)
     !
     ! low-storage 3rd-order Runge-Kutta scheme
     ! for time integration of the momentum equations.

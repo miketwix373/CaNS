@@ -12,7 +12,7 @@ module mod_utils
   private 
   public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral,&
    identify_fringe,fringeForce,linear_interp,MeanFlow2D,sort_couple,&
-   check_init_profile, map_trip
+   check_init_profile, map_trip, pg_blowing
 
 
   !@acc public device_memory_footprint
@@ -352,6 +352,22 @@ subroutine MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean, idir, localFlag)
     deallocate(pMeanLoc, pMeanGlob, pMeanLoc3d, coord3, n3d, maxn)
 
 end subroutine MeanFlow2D
+  subroutine pg_blowing (wpast,wnext,d99,uinf,beta,blow,n,zcg)
+    real(rp), intent(in):: wpast(:,:),wnext(:,:),d99(:),uinf(:),beta,zcg(:)
+    integer, intent(in):: n(3)
+    real(rp), intent(inout):: blow(:,:)
+    
+    real(rp):: wmean, dz
+    integer:: i,j
+
+    dz = zcg(n(3))-zcg(n(3)-1)
+    do i=1,n(1)
+      do j=1,n(2)
+        wmean = (wpast(i,j)+wnext(i,j))/2
+        blow(i,j) = wmean + dz*beta*uinf(i)/(2*d99(i))
+      end do
+    end do
+  end subroutine pg_blowing
 
   subroutine advection (n,dt,dl,upast,uMean,u_adv)
     real(rp), intent(in), dimension(:,0:,0:) :: upast
