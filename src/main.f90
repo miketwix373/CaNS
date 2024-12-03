@@ -82,6 +82,10 @@ program cans
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
+
+  use mod_laminarBL
+  use mod_conv
+
   implicit none
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
   real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp
@@ -133,6 +137,16 @@ program cans
   character(len=100) :: filename
   integer :: k,kk
   logical :: is_done,kill
+  ! --------------  SECTION RESERVED FOR NEW DECLARATIONS ---------------------------
+  real(rp),allocatable, dimension(:,:,:) :: inf,conv
+  real(rp),allocatable, dimension(:,:):: blow
+  logical :: bc_opt_flags(3) =  .false.
+  real(rp) :: thick0, etaMax
+  integer:: i
+
+
+
+
   !
   call MPI_INIT(ierr)
   call MPI_COMM_RANK(MPI_COMM_WORLD,myid,ierr)
@@ -196,6 +210,17 @@ program cans
            rhsby(  n(1),n(3),0:1), &
            rhsbz(  n(1),n(2),0:1))
 #endif
+! ---------------------------- SECTION RESERVED FOR NEW ALLOCATIONS ---------
+allocate(inf(3,0:n(2)+1,0:n(3)+1),conv(3,0:n(2)+1,0:n(3)+1))
+allocate(blow(0:n(1)+1,0:n(2)+1))
+
+
+
+
+! -------------- Define manually parameters -----------------
+  thick0 = 0.02_rp
+  etaMax = l(3)/thick0
+
 #if defined(_DEBUG)
   if(myid == 0) print*, 'This executable of CaNS was built with compiler: ', compiler_version()
   if(myid == 0) print*, 'Using the options: ', compiler_options()
@@ -301,28 +326,47 @@ program cans
   if(myid == 0) print*,'*** Device memory footprint (Gb): ', &
                   device_memory_footprint(n,n_z)/(1._sp*1024**3), ' ***'
 #endif
+
 #if defined(_DEBUG_SOLVER)
   call test_sanity_solver(ng,lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z,dli,dzc,dzf,dzci,dzfi,dzci_g,dzfi_g, &
-                          nb,is_bound,cbcvel,cbcpre,bcvel,bcpre)
+                          nb,is_bound,cbcvel,cbcpre,bcvel,bcpre,bc_opt_flags,inf,conv,blow)
 #endif
-  !
+ 
+ 
+ 
+  ! Initialization process
   if(.not.restart) then
     istep = 0
     time = 0.
+    inf = 0.0_rp
+    conv = 0.0_rp
+    blow = 0.0_rp
     call initflow(inivel,bcvel,ng,lo,l,dl,zc,zf,dzc,dzf,visc, &
                   is_forced,velf,bforce,is_wallturb,u,v,w,p)
+    
+    call initBL(1000,etaMax,thick0,inf,zc,visc,1.0_rp,n)
+
+    do i=1,n(1)
+      u(i,1:n(2),1:n(3)) = inf(1,1:n(2),1:n(3))
+      v(i,1:n(2),1:n(3)) = inf(2,1:n(2),1:n(3))
+      w(i,1:n(2),1:n(3)) = inf(3,1:n(2),1:n(3))
+    end do
+
     if(myid == 0) print*, '*** Initial condition succesfully set ***'
   else
     call load_all('r',trim(datadir)//'fld.bin',MPI_COMM_WORLD,ng,[1,1,1],lo,hi,u,v,w,p,time,istep)
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
-  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,bc_opt_flags,inf,conv,blow)
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
   !
   write(fldnum,'(i7.7)') istep
+
+
+
   !$acc wait ! not needed but to prevent possible future issues
   !$acc update self(u,v,w,p)
   if(iout1d > 0.and.mod(istep,max(iout1d,1)) == 0) then
@@ -344,7 +388,10 @@ program cans
   ! main loop
   !
   if(myid == 0) print*, '*** Calculation loop starts now ***'
+
+  bc_opt_flags(1) = .true.
   is_done = .false.
+  
   do while(.not.is_done)
 #if defined(_TIMING)
     !$acc wait(1)
@@ -442,13 +489,13 @@ program cans
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,bc_opt_flags,inf,conv,blow)
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
-      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,bc_opt_flags,inf,conv,blow)
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
     end do

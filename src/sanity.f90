@@ -43,6 +43,9 @@ module mod_sanity
     real(rp)        , intent(in), dimension(0:1,3)   :: bcpre
     logical         , intent(in), dimension(3)       :: is_forced
     logical :: passed
+
+
+
     !
     call chk_dims(ng,dims,passed);                 if(.not.passed) call abortit
     call chk_stop_type(stop_type,passed);          if(.not.passed) call abortit
@@ -227,6 +230,7 @@ module mod_sanity
     real(rp) :: divtot,divmax,resmax
     logical :: passed,passed_loc
     passed = .true.
+
     !$acc wait
     allocate(u(0:n(1)+1,0:n(2)+1,0:n(3)+1), &
              v(0:n(1)+1,0:n(2)+1,0:n(3)+1), &

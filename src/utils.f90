@@ -5,11 +5,200 @@
 !
 ! -
 module mod_utils
+  use mod_types
+  use mpi
+  use mod_common_mpi, only: ierr, myid
   implicit none
   private
-  public bulk_mean,f_sizeof,swap
+  public bulk_mean,f_sizeof,swap,linear_interp,MeanFlow2D
   !@acc public device_memory_footprint
+
 contains
+subroutine MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean, idir, localFlag)
+    integer, intent(in) :: ng(3), n(3), lo(3), hi(3), idir
+    integer :: coord(3), i, j, k, rank, np, startIter(2), endIter(2)
+    integer :: nrows, ncols, ngrows, ngcols, nmean, ngmean
+    integer :: blockSelect(2), row, nblock(2), nblocksCol, nblocksRow
+    integer, dimension(:,:), allocatable :: coord3, n3d
+    real(rp), intent(in), dimension(0:,0:,0:) :: p
+    real(rp), intent(inout), dimension(0:,0:) :: pMean
+    real(rp), intent(in), dimension(3) :: dl, l
+    real(rp), dimension(:,:), allocatable :: pMeanGlob, pMeanLoc
+    real(rp), dimension(:,:,:), allocatable :: pMeanLoc3d
+    real(rp) :: localsum
+    logical, intent(in) :: localFlag
+    integer, dimension(:), allocatable :: maxn
+    
+    ! Get MPI info
+    call MPI_COMM_RANK(MPI_COMM_WORLD, rank, ierr)
+    call MPI_COMM_SIZE(MPI_COMM_WORLD, np, ierr)
+
+    ! Set dimensions based on direction
+    select case (idir) 
+    case(1)
+        ncols = n(2)
+        nrows = n(3)
+        ngcols = ng(2)
+        ngrows = ng(3)
+        nmean = n(1)
+        ngmean = ng(1)
+        blockSelect = (/3,2/)
+    case(2)
+        ncols = n(1)
+        nrows = n(3)
+        ngcols = ng(1)
+        ngrows = ng(3)
+        nmean = n(2)
+        ngmean = ng(2)
+        blockSelect = (/3,1/)
+    case(3)
+        ncols = n(2)
+        nrows = n(1)
+        ngcols = ng(2)
+        ngrows = ng(1)
+        nmean = n(3)
+        ngmean = ng(3)
+        blockSelect = (/1,2/)
+    end select
+
+    ! Allocate arrays
+    allocate(pMeanLoc(0:nrows+1, 0:ncols+1))
+    allocate(pMeanGlob(0:ngrows+1, 0:ngcols+1))
+    allocate(pMeanLoc3d(0:nrows+1, 0:ncols+1, np))
+    allocate(coord3(3, np))
+    allocate(n3d(3, np))
+    allocate(maxn(np))
+
+    ! Initialize arrays
+    pMeanGlob = 0.0_rp
+    pMeanLoc = 0.0_rp
+    pMeanLoc3d = 0.0_rp
+    coord = 0
+    coord3 = 0
+
+    ! Compute block ID positions
+    coord = hi / n
+
+    ! Compute mean in stencil face
+    do i = 0, nrows+1
+        do j = 0, ncols+1
+            localsum = 0.0_rp
+            do k = 1, nmean
+                select case (idir)
+                case (1)
+                    localsum = localsum + p(k,j,i) * dl(1) / l(1)
+                case (2)
+                    localsum = localsum + p(j,k,i) * dl(2) / l(2)
+                case (3)
+                    localsum = localsum + p(i,j,k) * dl(3) / l(3)
+                end select
+            end do
+            pMeanLoc(i,j) = localsum
+        end do
+    end do
+
+    ! Gather data across processes
+    call MPI_Allgather(pMeanLoc, (nrows+2)*(ncols+2), MPI_REAL_RP, &
+                       pMeanLoc3d, (nrows+2)*(ncols+2), MPI_REAL_RP, &
+                       MPI_COMM_WORLD, ierr)
+    call MPI_Allgather(coord, 3, MPI_INTEGER, coord3, 3, MPI_INTEGER, &
+                       MPI_COMM_WORLD, ierr)
+    call MPI_Allgather(n, 3, MPI_INTEGER, n3d, 3, MPI_INTEGER, &
+                       MPI_COMM_WORLD, ierr)
+
+    ! Find max block dimensions
+    maxn = coord3(blockSelect(1),:)
+    nblocksRow = maxval(maxn)
+    maxn = coord3(blockSelect(2),:)
+    nblocksCol = maxval(maxn)
+    nblock = (/nblocksRow, nblocksCol/)
+
+    ! Assemble global mean
+    do k = 1, np
+        startIter = 1
+        endIter = n3d(blockSelect, k)
+
+        ! Adjust iteration bounds for edge blocks
+        do row = 1, 2
+            if (coord3(blockSelect(row), k) == 1) then
+                startIter(row) = 0
+            end if
+            if (coord3(blockSelect(row), k) == nblock(row)) then
+                endIter(row) = endIter(row) + 1
+            end if
+        end do
+
+        ! Assemble global array
+        do i = startIter(1), endIter(1)
+            do j = startIter(2), endIter(2)
+                select case (idir)
+                case(1)
+                    pMeanGlob((coord3(3,k)-1)*n3d(3,k)+i, (coord3(2,k)-1)*n3d(2,k)+j) = &
+                        pMeanGlob((coord3(3,k)-1)*n3d(3,k)+i, (coord3(2,k)-1)*n3d(2,k)+j) + &
+                        pMeanLoc3d(i,j,k)
+                case(2)
+                    pMeanGlob((coord3(3,k)-1)*n3d(3,k)+i, (coord3(1,k)-1)*n3d(1,k)+j) = &
+                        pMeanGlob((coord3(3,k)-1)*n3d(3,k)+i, (coord3(1,k)-1)*n3d(1,k)+j) + &
+                        pMeanLoc3d(i,j,k)
+                case(3)
+                    pMeanGlob((coord3(1,k)-1)*n3d(1,k)+i, (coord3(2,k)-1)*n3d(2,k)+j) = &
+                        pMeanGlob((coord3(1,k)-1)*n3d(1,k)+i, (coord3(2,k)-1)*n3d(2,k)+j) + &
+                        pMeanLoc3d(i,j,k)
+                end select
+            end do
+        end do
+    end do
+
+    ! Set output based on localFlag
+    if (localFlag) then
+        pMean = pMeanGlob(lo(blockSelect(1))-1:hi(blockSelect(1))+1, &
+                         lo(blockSelect(2))-1:hi(blockSelect(2))+1)
+    else
+        pMean = pMeanGlob
+    end if
+
+    ! Deallocate arrays
+    deallocate(pMeanLoc, pMeanGlob, pMeanLoc3d, coord3, n3d, maxn)
+
+end subroutine MeanFlow2D
+  subroutine linear_interp(x, y, n, x_new, y_new, n_new)
+      integer, intent(in) :: n, n_new
+      real(rp), intent(in) :: x(n), y(n), x_new(n_new)
+      real(rp), intent(out) :: y_new(n_new)
+      
+      ! Local variables
+      integer :: i, j
+      real(rp) :: t
+      logical :: found
+      
+      
+      ! Perform interpolation
+      do i = 1, n_new
+          ! Check bounds
+          if (x_new(i) < x(1) .or. x_new(i) > x(n)) then
+              return
+          endif
+          
+          ! Find interval
+          found = .false.
+          do j = 1, n-1
+              if (x_new(i) >= x(j) .and. x_new(i) <= x(j+1)) then
+                  ! Linear interpolation formula
+                  t = (x_new(i) - x(j)) / (x(j+1) - x(j))
+                  y_new(i) = y(j) + t * (y(j+1) - y(j))
+                  found = .true.
+                  exit
+              endif
+          end do
+          
+          ! Handle exact match with last point
+          if (.not. found .and. abs(x_new(i) - x(n)) < tiny(1.0_dp)) then
+              y_new(i) = y(n)
+          endif
+      end do
+      
+  end subroutine linear_interp
+
   subroutine bulk_mean(n,grid_vol_ratio,p,mean)
     !
     ! compute the mean value of an observable over the entire domain
