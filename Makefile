@@ -30,7 +30,7 @@ APP_DIR := $(ROOT_DIR)/app
 EXE_DIR := $(ROOT_DIR)/run
 CONFIG_DIR := $(ROOT_DIR)/configs
 LIBS_DIR := $(ROOT_DIR)/dependencies
-LIBS := -L/opt/homebrew/Cellar/fftw/3.3.10_1/lib -lfftw3
+LIBS := -L/opt/apps/fftw/3.3.10/lib/ -lfftw3
 INCS :=
 
 DEFINES :=

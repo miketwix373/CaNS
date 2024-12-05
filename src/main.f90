@@ -45,7 +45,7 @@ program cans
   use mod_initsolver     , only: initsolver
   use mod_load           , only: load_all
   use mod_mom            , only: bulk_forcing
-  use mod_rk             , only: rk
+  use mod_rk             , only: rk, rk_pt
   use mod_output         , only: out0d,gen_alias,out1d,out1d_chan,out2d,out3d,write_log_output,write_visu_2d,write_visu_3d
   use mod_param          , only: ng,l,dl,dli, &
                                  gtype,gr, &
@@ -63,6 +63,9 @@ program cans
                                  datadir,   &
                                  read_input
   use mod_sanity         , only: test_sanity_input,test_sanity_solver
+  use mod_stats           , only: mean2D,bl_stats, displ_thickness
+  use mod_laminarBL       , only: initBL
+  use mod_perturbation    , only: pert_force
 #if !defined(_OPENACC)
   use mod_solver         , only: solver
 #if defined(_IMPDIFF_1D)
@@ -78,7 +81,7 @@ program cans
 #endif
   use mod_timer          , only: timer_tic,timer_toc,timer_print
   use mod_updatep        , only: updatep
-  use mod_utils          , only: bulk_mean
+  use mod_utils          , only: bulk_mean, advection,check_init_profile,map_trip,pg_blowing
   !@acc use mod_utils    , only: device_memory_footprint
   use mod_types
   use omp_lib
@@ -88,24 +91,31 @@ program cans
 
   implicit none
   integer , dimension(3) :: lo,hi,n,n_x_fft,n_y_fft,lo_z,hi_z,n_z
-  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp
+  real(rp), allocatable, dimension(:,:,:) :: u,v,w,p,pp,upast,vpast,wpast,utarget,pf
+  real(rp), allocatable, dimension(:):: d99,uInfx
+  real(rp), allocatable, dimension(:,:) :: wpast_top, blowBC
+  integer, allocatable, dimension(:,:,:):: trip_mask
   real(rp), dimension(3) :: tauxo,tauyo,tauzo
   real(rp), dimension(3) :: f
+  real(rp):: thick0, etaMax
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanp
 #else
   integer    , dimension(2,2) :: arrplanp
 #endif
+  real(rp), allocatable, dimension(:) :: h0,h1
   real(rp), allocatable, dimension(:,:) :: lambdaxyp
   real(rp), allocatable, dimension(:) :: ap,bp,cp
   real(rp) :: normfftp
+  integer :: cycles = 0
+  real(rp), allocatable, dimension(:,:):: uMean,u_adv,v_adv,w_adv,uinf,vinf,winf
   type rhs_bound
     real(rp), allocatable, dimension(:,:,:) :: x
     real(rp), allocatable, dimension(:,:,:) :: y
     real(rp), allocatable, dimension(:,:,:) :: z
   end type rhs_bound
   type(rhs_bound) :: rhsbp
-  real(rp) :: alpha
+  real(rp) :: alpha,beta
 #if defined(_IMPDIFF)
 #if !defined(_OPENACC)
   type(C_PTR), dimension(2,2) :: arrplanu,arrplanv,arrplanw
@@ -134,7 +144,7 @@ program cans
   integer  :: savecounter
   character(len=7  ) :: fldnum
   character(len=4  ) :: chkptnum
-  character(len=100) :: filename
+  character(len=100) :: filename,filename2
   integer :: k,kk
   logical :: is_done,kill
   ! --------------  SECTION RESERVED FOR NEW DECLARATIONS ---------------------------
@@ -164,11 +174,27 @@ program cans
   !
   ! allocate variables
   !
+  allocate(d99(n(1)),uInfx(n(1)))
+  allocate(wpast_top(0:n(1)+1,0:n(2)+1),blowBC(0:n(1)+1,0:n(2)+1))
+  allocate(uMean(0:n(2)+1,0:n(3)+1), &
+          u_adv(0:n(2)+1,0:n(3)+1), &
+          v_adv(0:n(2)+1,0:n(3)+1), &
+          w_adv(0:n(2)+1,0:n(3)+1) )
+    allocate(uinf(0:n(2)+1,0:n(3)+1), &
+          vinf(0:n(2)+1,0:n(3)+1), &
+          winf(0:n(2)+1,0:n(3)+1))      
+  allocate(pf(0:n(1)+1,0:n(2)+1,0:n(3)+1))  
+  allocate(h0(0:n(2)+1),h1(0:n(2)+1))   
+  allocate(upast( 2,0:n(2)+1,0:n(3)+1), &
+           vpast( 2,0:n(2)+1,0:n(3)+1), &
+           wpast( 2,0:n(2)+1,0:n(3)+1))  
   allocate(u( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            v( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            w( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            p( 0:n(1)+1,0:n(2)+1,0:n(3)+1), &
            pp(0:n(1)+1,0:n(2)+1,0:n(3)+1))
+  allocate(trip_mask( 0:n(1)+1,0:n(2)+1,0:n(3)+1))           
+  allocate(utarget(3,0:n(2)+1,0:n(3)+1))
   allocate(lambdaxyp(n_z(1),n_z(2)))
   allocate(ap(n_z(3)),bp(n_z(3)),cp(n_z(3)))
   allocate(dzc( 0:n(3)+1), &
@@ -358,7 +384,15 @@ allocate(blow(0:n(1)+1,0:n(2)+1))
     if(myid == 0) print*, '*** Checkpoint loaded at time = ', time, 'time step = ', istep, '. ***'
   end if
   !$acc enter data copyin(u,v,w,p) create(pp)
+<<<<<<< HEAD
   call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,bc_opt_flags,inf,conv,blow)
+=======
+  call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.,.false.)
+  !call map_trip(lo,n,dl,zc,trip_mask,(/l(1)*0.1,l(3)*0.05/),1)
+  !u = u * trip_mask
+  !v = v * trip_mask
+  !w = w * trip_mask
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
   call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
   !
   ! post-process and write initial condition
@@ -388,8 +422,34 @@ allocate(blow(0:n(1)+1,0:n(2)+1))
   ! main loop
   !
   if(myid == 0) print*, '*** Calculation loop starts now ***'
+<<<<<<< HEAD
 
   bc_opt_flags(1) = .true.
+=======
+  utarget = 0.0_rp
+  thick0 = 0.02_rp
+  etaMax = l(3)/thick0
+  call initBL(1000,etaMax,thick0,utarget,zc(1:n(3)),visc,1.0_rp)
+  filename = trim(datadir)//'bl_init_u.out'
+  call check_init_profile(utarget,n,zc,filename,1)
+
+    filename = trim(datadir)//'bl_init_v.out'
+  call check_init_profile(utarget,n,zc,filename,2)
+
+    filename = trim(datadir)//'bl_init_w.out'
+  call check_init_profile(utarget,n,zc,filename,3)
+
+  uinf = utarget(1,:,:)
+  vinf = utarget(2,:,:)
+  winf = utarget(2,:,:)
+  do k=1,n(1)
+    u(k,:,:)= uinf
+    v(k,:,:)= vinf
+    w(k,:,:)= winf
+  end do
+  call pert_force(0.0_rp,pf,n,dl,zc_g,lo,l,cycles,.true.,h0,h1,thick0,1.0_rp)
+
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
   is_done = .false.
   
   do while(.not.is_done)
@@ -399,17 +459,35 @@ allocate(blow(0:n(1)+1,0:n(2)+1))
 #endif
     istep = istep + 1
     time = time + dt
+    
     if(myid == 0) print*, 'Time step #', istep, 'Time = ', time
+
     tauxo(:) = 0.
     tauyo(:) = 0.
     tauzo(:) = 0.
     dpdl(:)  = 0.
+    call mean2D(ng,n,lo,hi,dl,l,u,uMean)
+    upast = u(n(1)-1:n(1),:,:)
+    vpast = v(n(1)-1:n(1),:,:)
+    wpast = w(n(1)-1:n(1),:,:)
+    wpast_top = w(:,:,n(3))
+
     do irk=1,3
+    
       dtrk = sum(rkcoeff(:,irk))*dt
+      call advection(n,dtrk,dl(1),upast,uMean,u_adv)
+      call advection(n,dtrk,dl(1),vpast,uMean,v_adv)
+      call advection(n,dtrk,dl(1),wpast,uMean,w_adv)
+      
       dtrki = dtrk**(-1)
-      call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
-              is_forced,velf,bforce,u,v,w,f)
+      call pert_force(time,pf,n,dl,zc_g,lo,l,cycles,.false.,h0,h1,thick0,1.0_rp)
+      !call rk(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+      !        is_forced,velf,bforce,u,v,w,f)     
+      call rk_pt(rkcoeff(:,irk),n,dli,dzci,dzfi,grid_vol_ratio_c,grid_vol_ratio_f,visc,dt,p, &
+              is_forced,velf,bforce,u,v,w,f,pf)       
       call bulk_forcing(n,is_forced,f,u,v,w)
+      
+
 #if defined(_IMPDIFF)
       alpha = -.5*visc*dtrk
       !$OMP PARALLEL WORKSHARE
@@ -489,13 +567,34 @@ allocate(blow(0:n(1)+1,0:n(2)+1))
 #endif
 #endif
       dpdl(:) = dpdl(:) + f(:)
+<<<<<<< HEAD
       call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,bc_opt_flags,inf,conv,blow)
+=======
+      beta = 0.1_rp
+      call pg_blowing(wpast_top,w(:,:,n(3)),d99,uInfx,beta,blowBC,n,zc_g)
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,&
+          .true.,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf,blowBC)
+      !u = u * trip_mask
+      !v = v * trip_mask
+      !w = w * trip_mask
+!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.false.,dl,dzc,dzf,u,v,w,.false.,.false.)
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
       call fillps(n,dli,dzfi,dtrki,u,v,w,pp)
       call updt_rhs_b(['c','c','c'],cbcpre,n,is_bound,rhsbp%x,rhsbp%y,rhsbp%z,pp)
       call solver(n,ng,arrplanp,normfftp,lambdaxyp,ap,bp,cp,cbcpre,['c','c','c'],pp)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,pp)
+      call displ_thickness(u,n,ng,lo,hi,dl,l,d99,zc_g,uInfx)
       call correc(n,dli,dzci,dtrk,pp,u,v,w)
+<<<<<<< HEAD
       call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,bc_opt_flags,inf,conv,blow)
+=======
+      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,&
+          .true.,.true.,.true.,u_adv,v_adv,w_adv,uinf,vinf,winf,blowBC)
+      !u = u * trip_mask
+      !v = v * trip_mask
+      !w = w * trip_mask
+!      call bounduvw(cbcvel,n,bcvel,nb,is_bound,.true.,dl,dzc,dzf,u,v,w,.false.,.false.)
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
       call updatep(n,dli,dzci,dzfi,alpha,pp,p)
       call boundp(cbcpre,n,bcpre,nb,is_bound,dl,dzc,p)
     end do
@@ -570,6 +669,9 @@ allocate(blow(0:n(1)+1,0:n(2)+1))
     if(iout1d > 0.and.mod(istep,max(iout1d,1)) == 0) then
       !$acc wait
       !$acc update self(u,v,w,p)
+      filename = trim(datadir)//'1d_bl'//fldnum//'.out'
+      filename2 = datadir
+      call bl_stats(filename,filename2,n, ng, lo, hi, dl, l, u, v, w, zc, visc,myid,fldnum)
       include 'out1d.h90'
     end if
     if(iout2d > 0.and.mod(istep,max(iout2d,1)) == 0) then

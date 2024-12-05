@@ -12,7 +12,12 @@ module mod_bound
   private
   public boundp,bounduvw,updt_rhs_b
   contains
+<<<<<<< HEAD
   subroutine bounduvw(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,opt_flags,inf,conv,blow)
+=======
+  subroutine bounduvw(cbc,n,bc,nb,is_bound,is_correc,dl,dzc,dzf,u,v,w,adv_flag, &
+              inf_flag,blowing_flag,u_adv,v_adv,w_adv,uinf,vinf,winf,blowBC)
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
     !
     ! imposes velocity boundary conditions
     !
@@ -28,9 +33,11 @@ module mod_bound
     integer , intent(in), dimension(0:1,3  ) :: nb
     logical , intent(in), dimension(0:1,3  ) :: is_bound
     logical , intent(in)                     :: is_correc
+    logical , intent(in),optional            :: adv_flag,inf_flag,blowing_flag
     real(rp), intent(in), dimension(3 ) :: dl
     real(rp), intent(in), dimension(0:) :: dzc,dzf
     real(rp), intent(inout), dimension(0:,0:,0:) :: u,v,w
+    real(rp), intent(inout), optional, dimension(0:,0:) :: u_adv,v_adv,w_adv,uinf,vinf,winf,blowBC
     logical :: impose_norm_bc
     integer :: idir,nh
     
@@ -56,6 +63,7 @@ module mod_bound
     !
     impose_norm_bc = (.not.is_correc).or.(cbc(0,1,1)//cbc(1,1,1) == 'PP')
     if(is_bound(0,1)) then
+<<<<<<< HEAD
       if (opt_flags(1)) then
         if(impose_norm_bc) call set_bc_heterog(cbc(0,1,1),0,1,nh,.false.,inf(1,:,:),dl(1),u)
                   call set_bc_heterog(cbc(0,1,2),0,1,nh,.true. ,inf(2,:,:),dl(1),v)
@@ -64,12 +72,29 @@ module mod_bound
         if(impose_norm_bc) call set_bc(cbc(0,1,1),0,1,nh,.false.,bc(0,1,1),dl(1),u)
                           call set_bc(cbc(0,1,2),0,1,nh,.true. ,bc(0,1,2),dl(1),v)
                           call set_bc(cbc(0,1,3),0,1,nh,.true. ,bc(0,1,3),dl(1),w)
+=======
+      if (inf_flag) then
+      if(impose_norm_bc) call set_bc_heterog(cbc(0,1,1),0,1,nh,.false.,uinf,dl(1),u)
+                    call set_bc_heterog(cbc(0,1,2),0,1,nh,.true. ,vinf,dl(1),v)
+                    call set_bc_heterog(cbc(0,1,3),0,1,nh,.true. ,winf,dl(1),w)
+      else
+      if(impose_norm_bc) call set_bc(cbc(0,1,1),0,1,nh,.false.,bc(0,1,1),dl(1),u)
+                         call set_bc(cbc(0,1,2),0,1,nh,.true. ,bc(0,1,2),dl(1),v)
+                         call set_bc(cbc(0,1,3),0,1,nh,.true. ,bc(0,1,3),dl(1),w)
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
       end if
     end if
     if(is_bound(1,1)) then
+      if (adv_flag) then
+      if(impose_norm_bc) call set_bc_heterog(cbc(1,1,1),1,1,nh,.false.,u_adv,dl(1),u)
+                    call set_bc_heterog(cbc(1,1,2),1,1,nh,.true. ,v_adv,dl(1),v)
+                    call set_bc_heterog(cbc(1,1,3),1,1,nh,.true. ,w_adv,dl(1),w)
+
+      else
       if(impose_norm_bc) call set_bc(cbc(1,1,1),1,1,nh,.false.,bc(1,1,1),dl(1),u)
                          call set_bc(cbc(1,1,2),1,1,nh,.true. ,bc(1,1,2),dl(1),v)
                          call set_bc(cbc(1,1,3),1,1,nh,.true. ,bc(1,1,3),dl(1),w)
+      end if
     end if
     impose_norm_bc = (.not.is_correc).or.(cbc(0,2,2)//cbc(1,2,2) == 'PP')
     if(is_bound(0,2)) then
@@ -89,10 +114,17 @@ module mod_bound
       if(impose_norm_bc) call set_bc(cbc(0,3,3),0,3,nh,.false.,bc(0,3,3),dzf(0)   ,w)
     end if
     if(is_bound(1,3)) then
+      if(blowing_flag) then
+                         call set_bc(cbc(1,3,1),1,3,nh,.true. ,bc(1,3,1),dzc(n(3)),u)
+                         call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc(1,3,2),dzc(n(3)),v)
+      if(impose_norm_bc) call set_bc_heterog(cbc(1,3,3),1,3,nh,.true. ,blowBC,dzc(n(3)),w)
+      else
                          call set_bc(cbc(1,3,1),1,3,nh,.true. ,bc(1,3,1),dzc(n(3)),u)
                          call set_bc(cbc(1,3,2),1,3,nh,.true. ,bc(1,3,2),dzc(n(3)),v)
       if(impose_norm_bc) call set_bc(cbc(1,3,3),1,3,nh,.false.,bc(1,3,3),dzf(n(3)),w)
+      end if
     end if
+    
   end subroutine bounduvw
   !
   subroutine boundp(cbc,n,bc,nb,is_bound,dl,dzc,p)
@@ -569,6 +601,191 @@ module mod_bound
       end select
     end do
   end subroutine set_bc
+  
+  subroutine set_bc_heterog(ctype,ibound,idir,nh,centered,rvalue,dr,p)
+    implicit none
+    character(len=1), intent(in) :: ctype
+    integer , intent(in) :: ibound,idir,nh
+    logical , intent(in) :: centered
+    real(rp), intent(in):: dr
+    real(rp), intent(in),dimension(0:,0:) :: rvalue
+    real(rp), intent(inout), dimension(1-nh:,1-nh:,1-nh:) :: p
+    real(rp) :: sgn
+    real(rp), dimension(:,:), allocatable :: factor
+    integer  :: n,dh
+    !
+    n = size(p,idir) - 2*nh
+
+    allocate(factor(0:size(rvalue,1)-1,0:size(rvalue,2)-1))
+
+    factor = rvalue
+    if(ctype == 'D'.and.centered) then
+      factor = 2.*factor
+      sgn    = -1.
+    end if
+    if(ctype == 'N') then
+      if(     ibound == 0) then
+        factor = -dr*factor ! n.b.: only valid for nh /= 1 or factor /= 0
+      else if(ibound == 1) then
+        factor =  dr*factor ! n.b.: only valid for nh /= 1 or factor /= 0
+      end if
+      sgn    = 1.
+    end if
+    !
+    do dh=0,nh-1
+      select case(ctype)
+      case('D','N')
+        if(centered) then
+          select case(idir)
+          case(1)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(  0-dh,:,:) = factor+sgn*p(1+dh,:,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(n+1+dh,:,:) = factor+sgn*p(n-dh,:,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(2)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,  0-dh,:) = factor+sgn*p(:,1+dh,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,n+1+dh,:) = factor+sgn*p(:,n-dh,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(3)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,:,  0-dh) = factor+sgn*p(:,:,1+dh)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,:,n+1+dh) = factor+sgn*p(:,:,n-dh)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          end select
+        else if(.not.centered.and.ctype == 'D') then
+          select case(idir)
+          case(1)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(0-dh,:,:) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(n+1 ,:,:) = p(n-1,:,:) ! unused
+              p(n+dh,:,:) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(2)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,0-dh,:) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,n+1 ,:) = p(:,n-1,:) ! unused
+              p(:,n+dh,:) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(3)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,:,0-dh) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              p(:,:,n+1 ) = p(:,:,n-1) ! unused
+              p(:,:,n+dh) = factor
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          end select
+        else if(.not.centered.and.ctype == 'N') then
+          select case(idir)
+          case(1)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(0,:,:) = 1./3.*(-2.*factor+4.*p(1  ,:,:)-p(2  ,:,:))
+              p(0-dh,:,:) = 1.*factor + p(  1+dh,:,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(n,:,:) = 1./3.*(-2.*factor+4.*p(n-1,:,:)-p(n-2,:,:))
+              p(n+1,:,:) = p(n,:,:) ! unused
+              p(n+dh,:,:) = 1.*factor + p(n-1-dh,:,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(2)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(:,0  ,:) = 1./3.*(-2.*factor+4.*p(:,1,:)-p(:,2  ,:))
+              p(:,0-dh,:) = 1.*factor + p(:,  1+dh,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(:,n,:) = 1./3.*(-2.*factor+4.*p(:,n-1,:)-p(:,n-2,:))
+              p(:,n+1,:) = p(:,n,:) ! unused
+              p(:,n+dh,:) = 1.*factor + p(:,n-1-dh,:)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          case(3)
+            if     (ibound == 0) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(:,:,0) = 1./3.*(-2.*factor+4.*p(:,:,1  )-p(:,:,2  ))
+              p(:,:,0-dh) = 1.*factor + p(:,:,  1+dh)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            else if(ibound == 1) then
+              !$acc kernels default(present) async(1)
+              !$OMP PARALLEL WORKSHARE
+              !p(:,:,n) = 1./3.*(-2.*factor+4.*p(:,:,n-1)-p(:,:,n-2))
+              p(:,:,n+1) = p(:,:,n) ! unused
+              p(:,:,n+dh) = 1.*factor + p(:,:,n-1-dh)
+              !$OMP END PARALLEL WORKSHARE
+              !$acc end kernels
+            end if
+          end select
+        end if
+      end select
+    end do
+  end subroutine set_bc_heterog
   !
   subroutine inflow(idir,is_bound,vel2d,u,v,w)
     implicit none

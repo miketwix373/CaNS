@@ -9,11 +9,211 @@ module mod_utils
   use mpi
   use mod_common_mpi, only: ierr, myid
   implicit none
+<<<<<<< HEAD
   private
   public bulk_mean,f_sizeof,swap,linear_interp,MeanFlow2D
+=======
+  private 
+  public bulk_mean,f_sizeof,swap,advection,trapezoidal_integral,&
+   identify_fringe,fringeForce,linear_interp,MeanFlow2D,sort_couple,&
+   check_init_profile, map_trip, pg_blowing
+
+
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
   !@acc public device_memory_footprint
 
 contains
+<<<<<<< HEAD
+=======
+  subroutine map_trip(lo,n,dl,zcg,trip_mask,center,diam)
+    integer, intent(in):: lo(3),n(3),diam
+    real(rp), intent(in):: dl(3),center(2),zcg(:)
+    integer,intent(inout):: trip_mask(0:,0:,0:)
+
+    integer:: i,j,idx,idz
+    real(rp):: xposLow,xposHi,zposLow,zposHi
+
+    do i=0,n(1)
+      do j=0,n(3)
+        xposLow = (dl(1)*((lo(1)-1)+i))
+        xposHi  = (dl(1)*(lo(1)+i))
+        zposLow = zcg(j)
+        zposHi  = zcg(j)+1
+        if((xposLow<center(1)).and.(xposHi>center(1))) then
+          if ((zposLow<center(2)).and.(zposHi>center(2))) then
+            idx = i + lo(1)-1
+            idz = j
+          end if  
+        end if
+      end do
+    end do
+    
+    trip_mask = 1
+
+    do i=0,n(1)+1
+      do j=0,n(3)+1
+        if ((((lo(1)-1)+i >= idx-(diam-1))).and.(((lo(1)-1)+i <= idx+(diam-1)))) then
+          if ((j>=idz-diam-1).and.(j<=idz+(diam-1)))  then
+            trip_mask(i,:,j) = 0
+          end if
+        end if
+      end do
+    end do
+
+  end subroutine map_trip
+  subroutine check_init_profile (profile,n,zcg,fname,dir)
+    character(len=*), intent(in) :: fname
+    real(rp),intent(in)::profile(:,:,:), zcg(:)
+    integer, intent(in):: n(3),dir
+    integer:: i,iunit
+    character(len=*), parameter :: fmt_dp = '(*(es24.16e3,1x))', &
+                                 fmt_sp = '(*(es15.8e2,1x))'
+#if !defined(_SINGLE_PRECISION)
+  character(len=*), parameter :: fmt_rp = fmt_dp
+#else
+  character(len=*), parameter :: fmt_rp = fmt_sp
+#endif
+
+    if(myid == 0) then
+        open(newunit=iunit,file=fname)
+          do i=1,n(3)
+            write(iunit,fmt_rp) zcg(i),profile(dir,1,i)
+          end do
+        close(iunit)
+    end if
+  end subroutine check_init_profile 
+
+  subroutine sort_couple(vec_a, vec_b)
+      real(rp), dimension(:), intent(inout) :: vec_a  ! Vector to sort by
+      real(rp), dimension(:), intent(inout) :: vec_b  ! Related vector
+      integer :: i, j, n
+      real(rp) :: temp_a, temp_b
+      
+      ! Check if vectors have same size
+      n = size(vec_a)
+      
+      ! Bubble sort implementation
+      do i = 1, n-1
+          do j = 1, n-i
+              if (vec_a(j) > vec_a(j+1)) then
+                  ! Swap elements in vec_a
+                  temp_a = vec_a(j)
+                  vec_a(j) = vec_a(j+1)
+                  vec_a(j+1) = temp_a
+                  
+                  ! Swap corresponding elements in vec_b
+                  temp_b = vec_b(j)
+                  vec_b(j) = vec_b(j+1)
+                  vec_b(j+1) = temp_b
+              end if
+          end do
+      end do
+  end subroutine sort_couple
+
+  subroutine linear_interp(x, y, n, x_new, y_new, n_new)
+      integer, intent(in) :: n, n_new
+      real(dp), intent(in) :: x(n), y(n), x_new(n_new)
+      real(dp), intent(out) :: y_new(n_new)
+      
+      ! Local variables
+      integer :: i, j
+      real(dp) :: t
+      logical :: found
+      
+      
+      ! Perform interpolation
+      do i = 1, n_new
+          ! Check bounds
+          if (x_new(i) < x(1) .or. x_new(i) > x(n)) then
+              return
+          endif
+          
+          ! Find interval
+          found = .false.
+          do j = 1, n-1
+              if (x_new(i) >= x(j) .and. x_new(i) <= x(j+1)) then
+                  ! Linear interpolation formula
+                  t = (x_new(i) - x(j)) / (x(j+1) - x(j))
+                  y_new(i) = y(j) + t * (y(j+1) - y(j))
+                  found = .true.
+                  exit
+              endif
+          end do
+          
+          ! Handle exact match with last point
+          if (.not. found .and. abs(x_new(i) - x(n)) < tiny(1.0_dp)) then
+              y_new(i) = y(n)
+          endif
+      end do
+      
+  end subroutine linear_interp
+
+  subroutine cosine_blend_weight(x, N, weight)      
+      ! Input/Output variables
+      real(rp), intent(in)  :: x  ! Input value
+      real(rp), intent(in)  :: N    ! Lower bound (0 < N < 1)
+      real(rp), intent(out) :: weight ! Output weight
+      real(rp) :: pi, x_normalized
+      
+      pi = ACOS(-1.0)
+      ! Normalize x from [N,1] to [0,1]
+      x_normalized = (x - N)/(1.0_rp - N)
+      
+      ! Compute cosine blend weight: (1 - cos(π*x))/2
+      weight = (1.0_rp - cos(x_normalized * pi))/2.0_rp
+      
+  end subroutine cosine_blend_weight
+
+  subroutine fringeForce (bforce,isFringe,dt,u,utarget,lo,fringeLim,L,dir)
+    real(rp), intent(inout), dimension(0:,0:,0:):: bforce,u
+    logical, intent(in), dimension(0:,0:,0:):: isFringe
+    real(rp), intent(in) :: utarget(:,0:,0:), dt
+    integer :: i,j,k, lo(3),fringeLim,n,L,dir
+    real(rp):: weight,x,fringeStart
+    n = size(isFringe,1)
+    do i = 0, (n-1)
+      if (isFringe(i,1,1)) then
+        x = (lo(1)-1+ i)/L
+        fringeStart = fringeLim/L
+        call cosine_blend_weight(x,fringeStart,weight)
+        bforce(i,:,:) = -weight*(u(i,:,:)-utarget(dir,:,:))/dt
+      end if
+    end do
+  end subroutine fringeForce
+
+  subroutine  identify_fringe(isFringe,loLimFringe,lo)
+    logical, dimension(:,:,:), intent(inout) :: isFringe
+    integer, intent(in) :: loLimFringe, lo(3)
+    integer :: n,i
+
+    n = size(isFringe,1)
+    do i = 0, n-1   
+      if (lo(1)-1+i > loLimFringe) then
+        isFringe(i,:,:) = .true.
+      end if
+    end do 
+  end subroutine identify_fringe
+
+  subroutine trapezoidal_integral(x, fx, n, integral) 
+      integer, intent(in) :: n
+      real(rp), dimension(:), intent(in) :: x, fx
+      real(rp) :: integral
+      integer :: i
+      
+      ! Initialize integral with first and last points (half contribution)
+      integral = 0.5_rp * (fx(1) + fx(n))
+      
+      ! Add contribution from middle points
+      do i = 2, n-1
+          integral = integral + fx(i)
+      end do
+      
+      ! Multiply by dx (assumes uniform spacing)
+      integral = integral * (x(n) - x(1)) / (n - 1)
+      
+  end subroutine trapezoidal_integral
+
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
 subroutine MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean, idir, localFlag)
     integer, intent(in) :: ng(3), n(3), lo(3), hi(3), idir
     integer :: coord(3), i, j, k, rank, np, startIter(2), endIter(2)
@@ -161,6 +361,7 @@ subroutine MeanFlow2D(ng, n, lo, hi, dl, l, p, pMean, idir, localFlag)
     deallocate(pMeanLoc, pMeanGlob, pMeanLoc3d, coord3, n3d, maxn)
 
 end subroutine MeanFlow2D
+<<<<<<< HEAD
   subroutine linear_interp(x, y, n, x_new, y_new, n_new)
       integer, intent(in) :: n, n_new
       real(rp), intent(in) :: x(n), y(n), x_new(n_new)
@@ -198,6 +399,44 @@ end subroutine MeanFlow2D
       end do
       
   end subroutine linear_interp
+=======
+  subroutine pg_blowing (wpast,wnext,d99,uinf,beta,blow,n,zcg)
+    real(rp), intent(in):: wpast(:,:),wnext(:,:),d99(:),uinf(:),beta,zcg(:)
+    integer, intent(in):: n(3)
+    real(rp), intent(inout):: blow(:,:)
+    
+    real(rp):: wmean, dz
+    integer:: i,j
+
+    dz = zcg(n(3))-zcg(n(3)-1)
+    do i=1,n(1)
+      do j=1,n(2)
+        wmean = (wpast(i,j)+wnext(i,j))/2
+        blow(i,j) = wmean + dz*beta*uinf(i)/(2*d99(i))
+      end do
+    end do
+  end subroutine pg_blowing
+
+  subroutine advection (n,dt,dl,upast,uMean,u_adv)
+    real(rp), intent(in), dimension(:,0:,0:) :: upast
+    real(rp), intent(inout), dimension(0:,0:) :: u_adv
+    real(rp), intent(in), dimension(0:,0:) :: uMean
+    real(rp), intent(in) :: dt, dl
+    integer,intent(in) :: n(3)
+    real(rp):: c
+    integer:: j,k
+
+    do j=0,n(2)+1
+      do k=0,n(3)+1
+        !c = uMean(j,k) *dt/dl
+        c = dt/dl
+        u_adv(j,k) = upast(2,j,k)*(1-c)+c*upast(1,j,k)
+      end do
+    end do
+
+
+  end subroutine advection
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
 
   subroutine bulk_mean(n,grid_vol_ratio,p,mean)
     !

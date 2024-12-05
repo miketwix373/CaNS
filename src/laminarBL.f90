@@ -5,7 +5,12 @@ module mod_laminarBL
     private
     
     ! Make all public interfaces explicit
+<<<<<<< HEAD
     public :: initBL
+=======
+    public :: initBL, velocityBL, solve_blasius_ls_rk3
+    
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
     ! Define constants as parameters
     real(rp), parameter :: INITIAL_GUESS = 0.332057336215195_rp
     real(rp), parameter :: A2 = -5.0_rp/9.0_rp
@@ -14,6 +19,7 @@ module mod_laminarBL
     real(rp), parameter :: B2 = 15.0_rp/16.0_rp
     real(rp), parameter :: B3 = 8.0_rp/15.0_rp
 
+<<<<<<< HEAD
     contains
 
     subroutine initBL(n_points,eta_max, thick0, u, z, visc, ubulk,n)
@@ -21,6 +27,13 @@ module mod_laminarBL
         real(rp), intent(in) :: eta_max, thick0, visc, ubulk
         real(rp), dimension(:,0:,0:):: u
         real(rp), intent(in) :: z(:)
+=======
+contains
+    subroutine initBL(n_points, eta_max, thick0, u, z, visc, ubulk)
+        integer, intent(in) :: n_points
+        real(rp), intent(in) :: eta_max, thick0, visc, ubulk
+        real(rp), intent(inout) :: u(:,:,0:), z(:)  ! Fixed array bounds
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
         
         ! Local variables
         integer :: i
@@ -44,7 +57,11 @@ module mod_laminarBL
         call solve_blasius_ls_rk3(eta, f, fp, fpp, n_points, deta)
         
         ! Output results
+<<<<<<< HEAD
         call velocityBL(eta, f, fp, n_points,thick0, u, z, visc, ubulk)
+=======
+        call velocityBL(eta, f, fp, n_points, thick0, u, z, visc, ubulk)
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
         
         deallocate(eta, f, fp, fpp)
     end subroutine initBL
@@ -52,7 +69,11 @@ module mod_laminarBL
     subroutine velocityBL(eta, f, fp, n_points, thick0, u, z, visc, ubulk)
         real(rp), dimension(:), intent(in) :: eta, f, fp, z
         real(rp), intent(in) :: thick0, visc, ubulk
+<<<<<<< HEAD
         real(rp), intent(inout), dimension(:,0:,0:) :: u  ! Fixed array bounds
+=======
+        real(rp), intent(inout), dimension(:,:,0:) :: u  ! Fixed array bounds
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
         integer, intent(in) :: n_points
         
         ! Local variables
@@ -64,7 +85,11 @@ module mod_laminarBL
         if (thick0 <= 0) error stop "thick0 must be positive"
         if (visc <= 0) error stop "visc must be positive"
         
+<<<<<<< HEAD
         n = size(z, 1)-1
+=======
+        n = size(z, 1)
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
         allocate(etaEval(n), fpEval(n), fEval(n), stat=alloc_stat)
         if (alloc_stat /= 0) error stop "Allocation failed in velocityBL"
         
@@ -131,14 +156,28 @@ module mod_laminarBL
         end do
     end subroutine solve_blasius_ls_rk3
     
+<<<<<<< HEAD
     subroutine derivatives(y, dydt)
         real(rp), intent(in) :: y(3)
         real(rp), intent(out) :: dydt(3)
         
+=======
+    pure subroutine derivatives(y, dydt)
+        real(rp), intent(in) :: y(3)
+        real(rp), intent(out) :: dydt(3)
+        
+        ! Blasius equation in first-order form
+        ! y(1) = f
+        ! y(2) = f'
+        ! y(3) = f''
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
         dydt(1) = y(2)        ! df/dη = f'
         dydt(2) = y(3)        ! df'/dη = f''
         dydt(3) = -(y(1)*y(3))*0.5  ! df''/dη = -f*f''
     end subroutine derivatives
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> abb693ff53f5b8359f88929d9fd23b8557292714
 end module mod_laminarBL
